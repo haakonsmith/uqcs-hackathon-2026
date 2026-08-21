@@ -42,3 +42,6 @@ class player:
 
     def setAction(self, currentAction):
         self._currentAction = currentAction;
+
+    def getStatus(self):
+        return self._status;

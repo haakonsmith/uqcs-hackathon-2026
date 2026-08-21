@@ -1,15 +1,15 @@
 from websockets.sync.client import connect
 
-def hello():
-    uri = "ws://localhost:8765"
-    with connect(uri) as websocket:
-        name = input("What's your name? ")
+def listen_to_server():
+  uri = "ws://localhost:8765";
+  with connect(uri) as websocket:
+    inp = input("what u want to do ");
+    websocket.send(inp);
 
-        websocket.send(name)
-        print(f">>> {name}")
+    while True:
+        for message in websocket:
+            print(f"<<< {message}");
 
-        greeting = websocket.recv()
-        print(f"<<< {greeting}")
 
 if __name__ == "__main__":
-    hello()
+  listen_to_server();

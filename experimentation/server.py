@@ -7,11 +7,14 @@ from websockets.asyncio.server import serve
 from dataclasses import dataclass
 import websockets
 import player
+from player import player
 
 gameState = {};
 players = {};
 world = {};
 territory = {};
+playersTarget = 4;
+lobbyCount = 0;
 
 def createWorld():
     return {
@@ -37,16 +40,27 @@ async def startMenu(websocket):
     if (content == "joinGame"):
         players[websocket] = player(websocket);
         await websocket.send(f"Logging in");
+        await lobby(websocket);
     else:
         await websocket.send("invalid initation (temp)");
 
-async def clients(websocket):
-    #players[websocket] = player(websocket);
+async def lobby(websocket):
+    global lobbyCount;
+    players[websocket].setStatus("LOBBY");
+    if (lobbyCount >= 4):
+        websockets.Close(4, "Lobby is full, please reconnect");
+    for player in players.values():
+        if (player.getStatus() == "LOBBY"):
+            if (lobbyCount < 4):
+                lobbyCount += 1;
+                await player.getWebSocket().send(f"In lobby: player count {lobbyCount}/{playersTarget}");
 
+async def clients(websocket):
     try:
         await startMenu(websocket);
 
-    except: websockets.exceptions.ConnectionClosed;
+    except websockets.exceptions.ConnectionClosed:
+        print("disconnected");
 
     finally:
         if websocket in players:
