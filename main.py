@@ -1,8 +1,11 @@
-"""Minimal example: generate a board, look at it, render it.
+"""Minimal example: generate a board, render it, point at it.
 
     python main.py
 
-For the interactive version with live parameter tweaking, run `viewer.py`.
+Move the mouse to inspect the territory under the cursor, `o` toggles the
+ownership overlay, `q` quits.
+
+For live tweaking of the generation parameters, run `viewer.py`.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import blessed
 
 import terrain
+from viewer import CELL_WIDTH, territory_color
 
 SEED = 42
 
@@ -28,22 +32,86 @@ def describe(world: terrain.WorldMap) -> None:
     print(f"  {blocked} of its cells are impassable (water or mountain)")
 
 
-def render_colour(world: terrain.WorldMap) -> None:
-    """One-shot colour render. Two columns per cell keeps the aspect square."""
-    term = blessed.Terminal()
+def render(term: blessed.Terminal, world: terrain.WorldMap, overlay: bool, highlight_territory: int | None) -> str:
+    """Colour render, two columns per cell so the map isn't sheared vertically."""
+    lines: list[str] = []
     for row in world.grid:
-        print("".join(term.on_color_rgb(*cell.terrain.color) + "  " for cell in row) + term.normal)
+        parts: list[str] = []
+        for cell in row:
+            if highlight_territory is not None and cell.territory is not None and cell.territory == highlight_territory:
+                parts.append(term.on_color_rgb(*territory_color(cell.territory)))
+            elif overlay and cell.territory is not None:
+                parts.append(term.on_color_rgb(*territory_color(cell.territory)))
+            else:
+                parts.append(term.on_color_rgb(*cell.terrain.color))
+            parts.append(" " * CELL_WIDTH)
+        parts.append(term.normal)
+        lines.append("".join(parts))
+    return "\n".join(lines)
+
+
+def cell_at_cursor(world: terrain.WorldMap, x: int, y: int) -> terrain.Cell | None:
+    """Describe whatever the mouse is over. Screen columns are 2:1 to map cells."""
+    map_x, map_y = x // CELL_WIDTH, y
+    if not (0 <= map_x < world.width and 0 <= map_y < world.height):
+        return None
+
+    return world.cell(map_x, map_y)
+
+
+def at_cursor(world: terrain.WorldMap, x: int, y: int) -> str:
+    """Describe whatever the mouse is over. Screen columns are 2:1 to map cells."""
+    cell = cell_at_cursor(world, x, y)
+
+    if cell is None:
+        return ""
+
+    map_x, map_y = cell.x, cell.y
+
+    where = f"({map_x},{map_y}) {cell.terrain.label} height {cell.height:.2f}"
+    if cell.territory is None:
+        return f"{where} - unclaimed"
+
+    owner = world.territories[cell.territory]
+    return f"{where} - territory {owner.id}, continent {owner.continent}, {len(owner.neighbours)} neighbours"
 
 
 def main() -> None:
     world = terrain.generate(width=60, height=28, scale=7, octaves=6, seed=SEED, water_fraction=0.68)
+    term = blessed.Terminal()
 
-    print(terrain.render(world))  # plain ASCII
-    print()
-    print(terrain.render_territories(world))  # who owns what
-    print()
-    render_colour(world)
-    print()
+    overlay = False
+    hover = "move the mouse over the map - [o]verlay [q]uit"
+    dirty = True
+    highlight_territory = None
+
+    with term.fullscreen(), term.cbreak(), term.hidden_cursor(), term.mouse_enabled(report_motion=True):
+        while True:
+            if dirty:
+                print(term.home + render(term, world, overlay, highlight_territory), end="")
+                print(term.move_xy(0, world.height) + term.ljust(hover[: term.width]), end="", flush=True)
+                dirty = False
+
+            key = term.inkey()
+
+            if key.lower() == "q":
+                break
+
+            if key == "o":
+                overlay = not overlay
+                dirty = True
+            elif key.name and key.name.startswith("MOUSE_"):
+                # Keystroke reports mouse position as mouse_xy, not .x / .y,
+                # and gives (-1, -1) for anything that isn't a mouse event.
+                mx, my = key.mouse_xy
+
+                if (mx, my) != (-1, -1):
+                    hover = at_cursor(world, mx, my)
+                    cell = cell_at_cursor(world, mx, my)
+                    if cell is not None:
+                        highlight_territory = cell.territory
+                    dirty = True
+
     describe(world)
 
 
