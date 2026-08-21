@@ -32,13 +32,15 @@ def describe(world: terrain.WorldMap) -> None:
     print(f"  {blocked} of its cells are impassable (water or mountain)")
 
 
-def render(term: blessed.Terminal, world: terrain.WorldMap, overlay: bool) -> str:
+def render(term: blessed.Terminal, world: terrain.WorldMap, overlay: bool, highlight_territory: int | None) -> str:
     """Colour render, two columns per cell so the map isn't sheared vertically."""
     lines: list[str] = []
     for row in world.grid:
         parts: list[str] = []
         for cell in row:
-            if overlay and cell.territory is not None:
+            if highlight_territory is not None and cell.territory is not None and cell.territory == highlight_territory:
+                parts.append(term.on_color_rgb(*territory_color(cell.territory)))
+            elif overlay and cell.territory is not None:
                 parts.append(term.on_color_rgb(*territory_color(cell.territory)))
             else:
                 parts.append(term.on_color_rgb(*cell.terrain.color))
@@ -48,13 +50,24 @@ def render(term: blessed.Terminal, world: terrain.WorldMap, overlay: bool) -> st
     return "\n".join(lines)
 
 
-def at_cursor(world: terrain.WorldMap, x: int, y: int) -> str:
+def cell_at_cursor(world: terrain.WorldMap, x: int, y: int) -> terrain.Cell | None:
     """Describe whatever the mouse is over. Screen columns are 2:1 to map cells."""
     map_x, map_y = x // CELL_WIDTH, y
     if not (0 <= map_x < world.width and 0 <= map_y < world.height):
+        return None
+
+    return world.cell(map_x, map_y)
+
+
+def at_cursor(world: terrain.WorldMap, x: int, y: int) -> str:
+    """Describe whatever the mouse is over. Screen columns are 2:1 to map cells."""
+    cell = cell_at_cursor(world, x, y)
+
+    if cell is None:
         return ""
 
-    cell = world.cell(map_x, map_y)
+    map_x, map_y = cell.x, cell.y
+
     where = f"({map_x},{map_y}) {cell.terrain.label} height {cell.height:.2f}"
     if cell.territory is None:
         return f"{where} - unclaimed"
@@ -70,11 +83,12 @@ def main() -> None:
     overlay = False
     hover = "move the mouse over the map - [o]verlay [q]uit"
     dirty = True
+    highlight_territory = None
 
     with term.fullscreen(), term.cbreak(), term.hidden_cursor(), term.mouse_enabled(report_motion=True):
         while True:
             if dirty:
-                print(term.home + render(term, world, overlay), end="")
+                print(term.home + render(term, world, overlay, highlight_territory), end="")
                 print(term.move_xy(0, world.height) + term.ljust(hover[: term.width]), end="", flush=True)
                 dirty = False
 
@@ -90,8 +104,12 @@ def main() -> None:
                 # Keystroke reports mouse position as mouse_xy, not .x / .y,
                 # and gives (-1, -1) for anything that isn't a mouse event.
                 mx, my = key.mouse_xy
+
                 if (mx, my) != (-1, -1):
                     hover = at_cursor(world, mx, my)
+                    cell = cell_at_cursor(world, mx, my)
+                    if cell is not None:
+                        highlight_territory = cell.territory
                     dirty = True
 
     describe(world)
