@@ -1,0 +1,23 @@
+[project]
+name = "uqcs-hackathon-2026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "blessed>=1.48.0",
+    "numpy>=2.5.2",
+    "setuptools<81",
+    "vnoise>=0.1.0",
+]
+
+[tool.ruff]
+line-length = 160
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+]
