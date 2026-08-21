@@ -1,15 +1,18 @@
 
 import asyncio
 import time
+import random
 
 from websockets.asyncio.server import serve
+gameState = {};
+player = {};
+world = {};
+territory = {};
 
-players = {};
+def createPlayer(websocket):
+    playerId = str(websocket.id); #uuid??
 
-async def game(websocket):
-    playerId = websocket.id; #uuid??
-
-    players[websocket] = {
+    return {
         "userID": playerId, #idk what player values to add except userID as primary
         "connectionTime": time.time(),
         "lastSeen": time.time(), #for client heartbeat
@@ -17,10 +20,25 @@ async def game(websocket):
         "status": "Unknown",
 
         "territory": None,
-        "points": 0
+        "points": 0,
+        "currentAction": {
+            "mouseHover": False,
+            "mousePos": (0,0),
+            "mouseTile": (0,0)
+        }
     }
 
-    
+def createTerritory(name, id): #no arguments for now 
+    return {
+        "name": name,
+        "id": id,
+        "colour": random.randint(1, 15), #maybe int represents colour, like 1=blue
+    }
+
+
+async def game(websocket):
+    player[websocket] = createPlayer(websocket);
+
     #name = await websocket.recv();
     #print(f"<<< {name}")
 
