@@ -3,8 +3,9 @@
     python main.py
 
 The board is larger than the terminal, so only a slice is on screen. Arrow
-keys scroll it, the mouse inspects the cell under the cursor, `o` toggles the
-ownership overlay, `q` quits.
+keys and the mouse wheel scroll it (shift+wheel scrolls sideways), the mouse
+inspects the cell under the cursor, `o` toggles the ownership overlay, `q`
+quits.
 
 For live tweaking of the generation parameters, run `viewer.py`.
 """
@@ -26,6 +27,9 @@ BOARD_HEIGHT = 90
 
 SCROLL_KEYS = {"KEY_LEFT": (-1, 0), "KEY_RIGHT": (1, 0), "KEY_UP": (0, -1), "KEY_DOWN": (0, 1)}
 
+# Cells per wheel notch. One would feel glacial next to the arrow keys.
+WHEEL_STEP = 3
+
 
 @dataclass
 class Viewport:
@@ -42,10 +46,12 @@ class Viewport:
         self.rows = max(1, min(world.height, term.height - 1))
         self.scroll(0, 0, world)
 
-    def scroll(self, dx: int, dy: int, world: terrain.WorldMap) -> None:
-        """Move by (dx, dy) map cells, clamped so the view stays on the board."""
+    def scroll(self, dx: int, dy: int, world: terrain.WorldMap) -> bool:
+        """Move by (dx, dy) map cells, clamped. True if the view actually moved."""
+        before = (self.x, self.y)
         self.x = max(0, min(self.x + dx, world.width - self.cols))
         self.y = max(0, min(self.y + dy, world.height - self.rows))
+        return (self.x, self.y) != before
 
     def to_map(self, screen_x: int, screen_y: int) -> tuple[int, int]:
         """Screen position to map cell. Columns are 2:1 to cells."""
@@ -54,6 +60,22 @@ class Viewport:
     def covers(self, screen_y: int) -> bool:
         """False below the map, so the status bar isn't mistaken for board."""
         return 0 <= screen_y < self.rows
+
+
+def wheel_delta(name: str) -> tuple[int, int] | None:
+    """Scroll delta for a wheel event name, or None if it isn't one.
+
+    blessed reports these as MOUSE_SCROLL_UP / MOUSE_SCROLL_DOWN, with
+    modifiers folded into the name (MOUSE_SHIFT_SCROLL_UP). Shift scrolls
+    sideways, matching how most terminal apps treat it.
+    """
+    if "SCROLL_UP" in name:
+        step = -WHEEL_STEP
+    elif "SCROLL_DOWN" in name:
+        step = WHEEL_STEP
+    else:
+        return None
+    return (step, 0) if "SHIFT" in name else (0, step)
 
 
 def describe(world: terrain.WorldMap) -> None:
@@ -105,23 +127,35 @@ def cell_at_cursor(world: terrain.WorldMap, view: Viewport, x: int, y: int) -> t
     return world.cell(map_x, map_y)
 
 
-def at_cursor(world: terrain.WorldMap, view: Viewport, x: int, y: int) -> str:
-    """Describe whatever the mouse is over."""
-    cell = cell_at_cursor(world, view, x, y)
+def inspect(
+    world: terrain.WorldMap,
+    view: Viewport,
+    cursor: tuple[int, int] | None,
+) -> tuple[str, int | None]:
+    """Hover text and highlighted territory for the last known cursor position.
+
+    Scrolling moves the board under a stationary mouse, so this is recomputed
+    after every scroll rather than only on mouse motion.
+    """
+    if cursor is None:
+        return "move the mouse over the map", None
+
+    cell = cell_at_cursor(world, view, *cursor)
     if cell is None:
-        return ""
+        return "off the board", None
 
     where = f"({cell.x},{cell.y}) {cell.terrain.label} height {cell.height:.2f}"
     if cell.territory is None:
-        return f"{where} - unclaimed"
+        return f"{where} - unclaimed", None
 
     owner = world.territories[cell.territory]
-    return f"{where} - territory {owner.id}, continent {owner.continent}, {len(owner.neighbours)} neighbours"
+    detail = f"territory {owner.id}, continent {owner.continent}, {len(owner.neighbours)} neighbours"
+    return f"{where} - {detail}", owner.id
 
 
 def status(world: terrain.WorldMap, view: Viewport, hover: str) -> str:
     position = f"[{view.x},{view.y}] {view.cols}x{view.rows} of {world.width}x{world.height}"
-    return f" {position}  {hover}   arrows scroll  [o]verlay  [q]uit "
+    return f" {position}  {hover}   arrows/wheel scroll  [o]verlay  [q]uit "
 
 
 def main() -> None:
@@ -137,12 +171,12 @@ def main() -> None:
 
     view = Viewport()
     overlay = False
-    hover = "move the mouse over the map"
-    highlight_territory: int | None = None
+    cursor: tuple[int, int] | None = None
 
     with term.fullscreen(), term.cbreak(), term.hidden_cursor(), term.mouse_enabled(report_motion=True):
         view.fit(term, world)
         size = (term.width, term.height)
+        hover, highlight_territory = inspect(world, view, cursor)
         dirty = True
 
         while True:
@@ -161,6 +195,7 @@ def main() -> None:
             if (term.width, term.height) != size:
                 size = (term.width, term.height)
                 view.fit(term, world)
+                hover, highlight_territory = inspect(world, view, cursor)
                 dirty = True
                 continue
 
@@ -170,24 +205,32 @@ def main() -> None:
             if key.lower() == "q":
                 break
 
+            scrolled = False
+
             if key == "o":
                 overlay = not overlay
                 dirty = True
             elif key.name in SCROLL_KEYS:
                 dx, dy = SCROLL_KEYS[key.name]
-                before = (view.x, view.y)
-                view.scroll(dx, dy, world)
-                # Skip the redraw when already hard against an edge.
-                dirty = (view.x, view.y) != before
+                scrolled = view.scroll(dx, dy, world)
             elif key.name and key.name.startswith("MOUSE_"):
                 # Keystroke reports mouse position as mouse_xy, not .x / .y,
                 # and gives (-1, -1) for anything that isn't a mouse event.
                 mx, my = key.mouse_xy
                 if (mx, my) != (-1, -1):
-                    hover = at_cursor(world, view, mx, my)
-                    cell = cell_at_cursor(world, view, mx, my)
-                    highlight_territory = cell.territory if cell is not None else None
+                    cursor = (mx, my)
+
+                delta = wheel_delta(key.name)
+                if delta is not None:
+                    scrolled = view.scroll(*delta, world)
+                elif (mx, my) != (-1, -1):
+                    hover, highlight_territory = inspect(world, view, cursor)
                     dirty = True
+
+            if scrolled:
+                # The board moved under the cursor, so what it points at changed.
+                hover, highlight_territory = inspect(world, view, cursor)
+                dirty = True
 
     describe(world)
 
