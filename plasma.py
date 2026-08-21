@@ -17,7 +17,7 @@ import blessed
 
 
 def scale_255(val: float) -> int:
-    return int(round(val * 255))
+    return round(val * 255)
 
 
 def rgb_at_xy(term: blessed.Terminal, x: int, y: int, t: float) -> tuple[int, int, int]:
