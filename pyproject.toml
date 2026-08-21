@@ -7,8 +7,6 @@ requires-python = ">=3.12"
 dependencies = [
     "blessed>=1.48.0",
     "numpy>=2.5.2",
-    "setuptools<81",
-    "vnoise>=0.1.0",
 ]
 
 [tool.ruff]
@@ -25,8 +23,3 @@ dev = [
 [tool.mypy]
 python_version = "3.12"
 strict = true
-
-# vnoise 0.1.0 ships no py.typed marker, so its signatures are invisible.
-[[tool.mypy.overrides]]
-module = "vnoise"
-ignore_missing_imports = true

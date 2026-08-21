@@ -1,7 +1,7 @@
 """Terrain and territory generation for a top-down, Risk-style strategy map.
 
-Perlin noise comes from `vnoise`, which evaluates the whole grid in one
-vectorised call rather than per-cell.
+Perlin noise is generated here, vectorised over numpy so the whole grid is
+filled in one pass per octave rather than cell by cell.
 
 The pipeline is three passes:
 
@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import math
 import random
-import warnings
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -28,12 +27,6 @@ from enum import Enum
 
 import numpy as np
 from numpy.typing import NDArray
-
-# vnoise 0.1.0 reads its version through pkg_resources at import time, which
-# warns on every run. Nothing downstream depends on it, so keep it quiet.
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", category=UserWarning, module="vnoise")
-    import vnoise
 
 # --------------------------------------------------------------------------
 # Terrain
@@ -197,14 +190,103 @@ def _edge_falloff(width: int, height: int) -> NDArray[np.float64]:
     return np.where(depth >= 1.0, 0.0, (1.0 - depth) ** 2)
 
 
-def _fbm(seed: int | None, width: int, height: int, scale: float, octaves: int) -> NDArray[np.float64]:
-    """Sample vnoise over the whole grid at once, returned as [y][x]."""
-    noise = vnoise.Noise(seed)
+# Eight unit-length gradient vectors, one per corner direction.
+_GRADIENTS = np.array(
+    [
+        (1.0, 0.0),
+        (-1.0, 0.0),
+        (0.0, 1.0),
+        (0.0, -1.0),
+        (0.7071067811865476, 0.7071067811865476),
+        (-0.7071067811865476, 0.7071067811865476),
+        (0.7071067811865476, -0.7071067811865476),
+        (-0.7071067811865476, -0.7071067811865476),
+    ],
+    dtype=np.float64,
+)
+
+
+def _fade(t: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Ken Perlin's smoothstep: 6t^5 - 15t^4 + 10t^3."""
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+
+def _lerp(a: NDArray[np.float64], b: NDArray[np.float64], t: NDArray[np.float64]) -> NDArray[np.float64]:
+    return a + t * (b - a)
+
+
+def _permutation(seed: int | None) -> NDArray[np.int64]:
+    table = np.random.default_rng(seed).permutation(256)
+    # Doubled so lookups of index+1 never run off the end.
+    return np.concatenate([table, table]).astype(np.int64)
+
+
+def _perlin(perm: NDArray[np.int64], xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Classic 2D Perlin noise over the grid xs x ys, returned as [y][x].
+
+    Every step is whole-array: xs broadcasts along columns and ys along rows,
+    so one call fills the entire map.
+    """
+    x = xs[None, :]
+    y = ys[:, None]
+
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    xf, yf = x - x0, y - y0
+    xi, yi = x0 & 255, y0 & 255
+
+    # Hash the four cell corners. Values stay under 512, which is why the
+    # permutation table is doubled.
+    aa = perm[perm[xi] + yi]
+    ab = perm[perm[xi] + yi + 1]
+    ba = perm[perm[xi + 1] + yi]
+    bb = perm[perm[xi + 1] + yi + 1]
+
+    def dot_grad(hashed: NDArray[np.int64], dx: NDArray[np.float64], dy: NDArray[np.float64]) -> NDArray[np.float64]:
+        gradient = _GRADIENTS[hashed & 7]
+        gx: NDArray[np.float64] = gradient[..., 0]
+        gy: NDArray[np.float64] = gradient[..., 1]
+        return gx * dx + gy * dy
+
+    u, v = _fade(xf), _fade(yf)
+    top = _lerp(dot_grad(aa, xf, yf), dot_grad(ba, xf - 1, yf), u)
+    bottom = _lerp(dot_grad(ab, xf, yf - 1), dot_grad(bb, xf - 1, yf - 1), u)
+    # sqrt(2) scales the theoretical +/-0.707 range up to about +/-1.
+    scaled: NDArray[np.float64] = _lerp(top, bottom, v) * math.sqrt(2)
+    return scaled
+
+
+def _fbm(
+    seed: int | None,
+    width: int,
+    height: int,
+    scale: float,
+    octaves: int,
+    persistence: float = 0.5,
+    lacunarity: float = 2.0,
+) -> NDArray[np.float64]:
+    """Fractional Brownian motion: stacked octaves of Perlin noise, as [y][x].
+
+    Each octave doubles the frequency (lacunarity) and halves the amplitude
+    (persistence), which adds fine detail on top of the broad shapes. All
+    octaves share one permutation table, so the layers stay coherent.
+    """
+    perm = _permutation(seed)
     xs = np.arange(width) / scale
     ys = np.arange(height) / scale
-    # grid_mode indexes [x][y]; the rest of this module works in rows of y.
-    # vnoise is untyped, so pin the dtype on the way out.
-    return np.asarray(noise.noise2(xs, ys, octaves=octaves, grid_mode=True), dtype=np.float64).T
+
+    total = np.zeros((height, width), dtype=np.float64)
+    amplitude = 1.0
+    frequency = 1.0
+    max_amplitude = 0.0
+
+    for _ in range(octaves):
+        total += _perlin(perm, xs * frequency, ys * frequency) * amplitude
+        max_amplitude += amplitude
+        amplitude *= persistence
+        frequency *= lacunarity
+
+    return total / max_amplitude
 
 
 def height_field(
