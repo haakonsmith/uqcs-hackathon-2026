@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
+from numpy.typing import NDArray
 
 # vnoise 0.1.0 reads its version through pkg_resources at import time, which
 # warns on every run. Nothing downstream depends on it, so keep it quiet.
@@ -179,7 +180,7 @@ _ORTHOGONAL = ((1, 0), (-1, 0), (0, 1), (0, -1))
 _BORDER_MARGIN = 0.16
 
 
-def _edge_falloff(width: int, height: int) -> np.ndarray:
+def _edge_falloff(width: int, height: int) -> NDArray[np.float64]:
     """0 across the interior, ramping to 1 at the border.
 
     Subtracting this from the height field rings the map in ocean, so
@@ -196,13 +197,14 @@ def _edge_falloff(width: int, height: int) -> np.ndarray:
     return np.where(depth >= 1.0, 0.0, (1.0 - depth) ** 2)
 
 
-def _fbm(seed: int | None, width: int, height: int, scale: float, octaves: int) -> np.ndarray:
+def _fbm(seed: int | None, width: int, height: int, scale: float, octaves: int) -> NDArray[np.float64]:
     """Sample vnoise over the whole grid at once, returned as [y][x]."""
     noise = vnoise.Noise(seed)
     xs = np.arange(width) / scale
     ys = np.arange(height) / scale
     # grid_mode indexes [x][y]; the rest of this module works in rows of y.
-    return noise.noise2(xs, ys, octaves=octaves, grid_mode=True).T
+    # vnoise is untyped, so pin the dtype on the way out.
+    return np.asarray(noise.noise2(xs, ys, octaves=octaves, grid_mode=True), dtype=np.float64).T
 
 
 def height_field(
@@ -215,7 +217,7 @@ def height_field(
     water_fraction: float,
     continent_scale: float,
     mask_weight: float,
-) -> np.ndarray:
+) -> NDArray[np.float64]:
     """Two layers of Perlin fBm, shaped by the edge falloff, remapped to 0..1.
 
     A separate low-frequency mask decides *where* land is, while the detail
