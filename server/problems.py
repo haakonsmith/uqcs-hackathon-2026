@@ -92,6 +92,141 @@ BANK: tuple[Entry, ...] = (
     ),
     Entry(
         problem=Problem(
+            id="Count to 12500",
+            title="Border Patrol",
+            statement=(
+                "Read w and h, then a w-by-h grid of '.' and '#'. Print how many '#' "
+                "cells touch a '.' cell or the edge of the grid, counting only the "
+                "four orthogonal directions."
+            ),
+            signature="stdin: w h, then h lines -> stdout: one integer",
+            examples=[("3 3\\n###\\n#.#\\n###", "8")],
+        ),
+        tests=(
+            TestCase("3 3\n###\n#.#\n###", "8"),
+            TestCase("1 1\n#", "1"),
+            TestCase("2 2\n..\n..", "0"),
+            TestCase("4 3\n####\n####\n####", "10"),
+            TestCase("3 3\n...\n.#.\n...", "1"),
+        ),
+    ),
+    Entry(
+    problem=Problem(
+        id="EZ 001",
+        title="Echo Echo",
+        statement="Read a single word from input. Print it back three times separated by spaces.",
+        signature="stdin: one string -> stdout: three space-separated strings",
+        examples=[("Hello", "Hello Hello Hello")],
+    ),
+    tests=(
+        TestCase("Hello", "Hello Hello Hello"),
+        TestCase("Python", "Python Python Python"),
+        TestCase("A", "A A A"),
+    ),
+),
+Entry(
+    problem=Problem(
+        id="EZ 002",
+        title="Next Integer",
+        statement="Read a single integer N. Print the number that comes immediately after it (N + 1).",
+        signature="stdin: one integer -> stdout: one integer",
+        examples=[("5", "6")],
+    ),
+    tests=(
+        TestCase("5", "6"),
+        TestCase("-1", "0"),
+        TestCase("99", "100"),
+    ),
+),
+Entry(
+    problem=Problem(
+        id="EZ 003",
+        title="Secret Password Check",
+        statement="Read a string. If it matches exactly 'let-me-in', print 'ACCESS GRANTED'. Otherwise, print 'ACCESS DENIED'.",
+        signature="stdin: one string -> stdout: 'ACCESS GRANTED' or 'ACCESS DENIED'",
+        examples=[("let-me-in", "ACCESS GRANTED")],
+    ),
+    tests=(
+        TestCase("let-me-in", "ACCESS GRANTED"),
+        TestCase("password123", "ACCESS DENIED"),
+        TestCase("LET-ME-IN", "ACCESS DENIED"),
+    ),
+),
+Entry(
+    problem=Problem(
+        id="EZ 004",
+        title="Full Name Joiner",
+        statement="Read a first name and a last name separated by a space. Print them back separated by a comma and a space in the format 'LastName, FirstName'.",
+        signature="stdin: two space-separated strings -> stdout: one combined string",
+        examples=[("John Smith", "Smith, John")],
+    ),
+    tests=(
+        TestCase("John Smith", "Smith, John"),
+        TestCase("Alice Green", "Green, Alice"),
+        TestCase("A B", "B, A"),
+    ),
+),
+Entry(
+    problem=Problem(
+        id="EZ 005",
+        title="Double Trouble",
+        statement="Read a single integer N. Print its value multiplied by 2.",
+        signature="stdin: one integer -> stdout: one integer",
+        examples=[("10", "20")],
+    ),
+    tests=(
+        TestCase("10", "20"),
+        TestCase("0", "0"),
+        TestCase("-5", "-10"),
+    ),
+),
+Entry(
+    problem=Problem(
+        id="EZ 006",
+        title="Length Checker",
+        statement="Read a single word. Print the total number of characters in that word.",
+        signature="stdin: one string -> stdout: one integer",
+        examples=[("apple", "5")],
+    ),
+    tests=(
+        TestCase("apple", "5"),
+        TestCase("a", "1"),
+        TestCase("programming", "11"),
+    ),
+)
+,
+Entry(
+    problem=Problem(
+        id="EZ 007",
+        title="Is It Positive?",
+        statement="Read a single integer N. Print 'YES' if N is strictly greater than 0, otherwise print 'NO'.",
+        signature="stdin: one integer -> stdout: 'YES' or 'NO'",
+        examples=[("5", "YES")],
+    ),
+    tests=(
+        TestCase("5", "YES"),
+        TestCase("-3", "NO"),
+        TestCase("0", "NO"),
+    ),
+)
+,
+Entry(
+    problem=Problem(
+        id="EZ 008",
+        title="Scream Converter",
+        statement="Read a lowercase word. Convert all of its letters to uppercase and add an exclamation mark at the end.",
+        signature="stdin: one string -> stdout: one string",
+        examples=[("hello", "HELLO!")],
+    ),
+    tests=(
+        TestCase("hello", "HELLO!"),
+        TestCase("run", "RUN!"),
+        TestCase("a", "A!"),
+    ),
+)
+,
+    Entry(
+        problem=Problem(
             id="dice-odds",
             title="Dice Odds",
             statement=(
