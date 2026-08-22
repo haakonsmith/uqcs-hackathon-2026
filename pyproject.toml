@@ -9,6 +9,7 @@ dependencies = [
     "logging>=0.4.9.6",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
+    "pydantic>=2.13.4",
     "uuid64>=0.2.0",
     "websockets>=17.0.1",
 ]

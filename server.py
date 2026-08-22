@@ -1,38 +1,19 @@
 import asyncio
-import json
-import logging
-import random
 
-import websockets
-from websockets.asyncio.server import serve
-from websockets.exceptions import ConnectionClosedError
-
-import server.player
+from server.server import Server
 
 gameState = {}
 players = {}
-world = {}
+world: World | None = None
 territory = {}
 playersTarget = 4
 lobbyCount = 0
 
 
-def createWorld():
-    return {"numTerritories": 0}
-
-
-def createTerritory(name: str, id: str):  # no arguments for now
-    return {
-        "name": name,
-        "id": id,
-        "colour": random.randint(1, 15),  # maybe int represents colour, like 1=blue (random for now)
-    }
-
-
 async def startMenu(websocket: websockets.ServerConnection):
     content = await websocket.recv()
     if content == "joinGame":
-        players[websocket] = player(websocket)
+        players[websocket] = player.Player(websocket.id)
         if lobbyCount < playersTarget:
             await websocket.send("Logging in")
             await lobby(websocket)
@@ -49,14 +30,19 @@ async def lobby(websocket: websockets.ServerConnection):
     print(len(players))
     for p in players.values():
         if p.getStatus() == "LOBBY":
-            if lobbyCount == playersTarget:
-                await game()
             await p.getWebSocket().send(f"LOBBY: {lobbyCount}/{playersTarget}")
+    if lobbyCount == playersTarget:
+        await game()
 
 
 async def game():
-    for player in players.values():
-        player.getWebSocket().send("Game starting")
+    global world
+    world = create_world()
+    payload = world.to_json()
+    for p in players.values():
+        p.setStatus("GAME")
+        await p.getWebSocket().send("Game starting")
+        await p.getWebSocket().send(payload)
 
 
 async def clients(websocket: websockets.ServerConnection):
@@ -73,41 +59,6 @@ async def clients(websocket: websockets.ServerConnection):
             if players[websocket].getStatus() == "LOBBY":
                 lobbyCount -= 1
             del players[websocket]
-
-
-class Server:
-    def __init__(self) -> None:
-        self.connections: set[websockets.ServerConnection] = set()
-
-    async def register_connection(self, websocket: websockets.ServerConnection):
-        logging.info("Connection received")
-        self.connections.add(websocket)
-
-        async for message in websocket:
-            if isinstance(message, str):
-                event = json.loads(message)
-
-                print(f"got event {event}")
-
-    async def handler(self, websocket: websockets.ServerConnection):
-        try:
-            await self.register_connection(websocket)
-        except ConnectionClosedError:
-            logging.warning("Connection abruptly closed!")
-        finally:
-            self.connections.remove(websocket)
-
-    async def run(self):
-
-        async with serve(
-            self.handler,
-            "localhost",
-            8888,
-            ping_interval=None,
-            max_size=64 * 1024 * 1024,
-        ):
-            logging.info("Server started")
-            await asyncio.Future()
 
 
 async def main():

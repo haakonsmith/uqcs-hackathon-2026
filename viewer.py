@@ -17,29 +17,20 @@ Keys:
 from __future__ import annotations
 
 import argparse
-import colorsys
 import random
 from dataclasses import dataclass
 
 import blessed
 
-import terrain
-
-# Each map cell is drawn two columns wide, because terminal cells are roughly
-# twice as tall as they are wide and a 1:1 mapping shears the map vertically.
-CELL_WIDTH = 2
+from client.render import CELL_WIDTH, Color, territory_color
+from server import world as terrain
 
 VIEWS = ("terrain", "territories", "height")
-
-# Irrational step around the hue circle, so neighbouring ids never share a hue.
-_HUE_STEP = 0.6180339887498949
 
 _UNCLAIMED = (70, 70, 70)
 
 # Grey levels in the height view.
 _HEIGHT_BANDS = 16
-
-Color = tuple[int, int, int]
 
 
 @dataclass
@@ -51,12 +42,6 @@ class Settings:
     seed: int
     water: float
     territory_size: int
-
-
-def territory_color(territory_id: int) -> Color:
-    hue = (territory_id * _HUE_STEP) % 1.0
-    r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.88)
-    return round(r * 255), round(g * 255), round(b * 255)
 
 
 def _blend(a: Color, b: Color, t: float) -> Color:

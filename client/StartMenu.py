@@ -1,4 +1,5 @@
 import time
+
 import blessed
 from GetUsername import get_username
 
@@ -8,38 +9,35 @@ TITLE_ART = [
     "   ██   ██      ██   ██ ████  ████ ██ ████   ██ ██   ██    ██    ██  ██    ██ ███   ██",
     "   ██   █████   ██████  ██ ████ ██ ██ ██ ██  ██ ███████    ██    ██  ██    ██ ██ ██ ██",
     "   ██   ██      ██   ██ ██  ██  ██ ██ ██  ██ ██ ██   ██    ██    ██  ██    ██ ██  ████",
-    "   ██   ███████ ██   ██ ██      ██ ██ ██   ████ ██   ██    ██    ██   ██████  ██   ███"
+    "   ██   ███████ ██   ██ ██      ██ ██ ██   ████ ██   ██    ██    ██   ██████  ██   ███",
 ]
 
 # --- World Map Template ---
 WORLD_MAP = [
-"           ################      ##`             #                ",
-"         ######## #########      ##               #               ",
-"          ######    #######                   ######    # #       ",
-"        ##########  ########             ##################       ",
-" ##################  ####         ##############################  ",
-" ##################   #    #    ###############################   ",
-"  ##################             ########################         ",
-"        ############        #############################  #      ",
-"        #############         ##########################          ",
-"         ########            ############################         ",
-"          ######            #########################             ",
-" #          ###  ##        ##############  ### ####               ",
-"                #####       ###########                           ",
-"                ########         ######          # #   #          ",
-"                 #######         #######              ###         ",
-"                 ######          #### ##           ########       ",
-"                 ####             ##                #######       ",
-"                  #                                      #        ",
-"                 ##                                               ",
-"                                                                  "
+    "           ################      ##`             #                ",
+    "         ######## #########      ##               #               ",
+    "          ######    #######                   ######    # #       ",
+    "        ##########  ########             ##################       ",
+    " ##################  ####         ##############################  ",
+    " ##################   #    #    ###############################   ",
+    "  ##################             ########################         ",
+    "        ############        #############################  #      ",
+    "        #############         ##########################          ",
+    "         ########            ############################         ",
+    "          ######            #########################             ",
+    " #          ###  ##        ##############  ### ####               ",
+    "                #####       ###########                           ",
+    "                ########         ######          # #   #          ",
+    "                 #######         #######              ###         ",
+    "                 ######          #### ##           ########       ",
+    "                 ####             ##                #######       ",
+    "                  #                                      #        ",
+    "                 ##                                               ",
+    "                                                                  ",
 ]
 
-MENU_ITEMS = [
-    {"name": "JOIN GAME", "pos": "center_top"},
-    {"name": "EXIT", "pos": "center_bottom"},
-    {"name": "SETTINGS", "pos": "top_right"}
-]
+MENU_ITEMS = [{"name": "JOIN GAME", "pos": "center_top"}, {"name": "EXIT", "pos": "center_bottom"}, {"name": "SETTINGS", "pos": "top_right"}]
+
 
 def get_button_geometry(item, h, w):
     name = item["name"]
@@ -57,6 +55,7 @@ def get_button_geometry(item, h, w):
         bx, by = 0, 0
     return bx, by, btn_len
 
+
 def render_static_background(term: blessed.Terminal):
     """Renders the ocean, world map, and title ONCE so they never rerender unnecessarily."""
     h = term.height
@@ -67,7 +66,7 @@ def render_static_background(term: blessed.Terminal):
     map_h = len(WORLD_MAP)
     map_w = len(WORLD_MAP[0]) * 2
     y_offset = 2
-    start_y = max(0, (h - map_h) // 2) + y_offset #renders everything in the middle
+    start_y = max(0, (h - map_h) // 2) + y_offset  # renders everything in the middle
     start_x = max(0, (w - map_w) // 2)
 
     map_rows = {start_y + r_idx: row for r_idx, row in enumerate(WORLD_MAP)}
@@ -76,7 +75,7 @@ def render_static_background(term: blessed.Terminal):
         row_str = []
         has_map = y in map_rows
         map_row_text = map_rows.get(y, "")
-        
+
         x = 0
         while x < w - 1:
             is_land = False
@@ -84,7 +83,7 @@ def render_static_background(term: blessed.Terminal):
                 rel_x = x - start_x
                 if rel_x >= 0 and rel_x % 2 == 0:
                     c_idx = rel_x // 2
-                    if c_idx < len(map_row_text) and map_row_text[c_idx] != ' ':
+                    if c_idx < len(map_row_text) and map_row_text[c_idx] != " ":
                         is_land = True
 
             if is_land:
@@ -92,26 +91,27 @@ def render_static_background(term: blessed.Terminal):
             else:
                 row_str.append(term.blue_on_blue("██"))
             x += 2
-        
+
         output.append(term.move_xy(0, y) + "".join(row_str))
 
     # 2. Render Title Art with Transparent Gaps
     for i, line in enumerate(TITLE_ART):
         tx = max(0, (w - len(line)) // 2)
-        title_start = 1 #Height the title is rendered at from the top
-        ty = title_start + i  
+        title_start = 1  # Height the title is rendered at from the top
+        ty = title_start + i
         if ty < h:
             for c_idx, char in enumerate(line):
                 x = tx + c_idx
                 if 0 <= x < w:
-                    if char != ' ':
+                    if char != " ":
                         # Draw the letter blocks
                         output.append(term.move_xy(x, ty) + term.red_on_blue(char))
                     else:
                         # Draw solid blue over the gaps to hide the map
-                        output.append(term.move_xy(x, ty) + term.blue_on_blue(' '))
+                        output.append(term.move_xy(x, ty) + term.blue_on_blue(" "))
 
     print("".join(output), end="", flush=True)
+
 
 def render_menu_buttons(term: blessed.Terminal, selected_idx: int):
     """Updates the menu buttons with high-contrast, chunky button styling."""
@@ -121,14 +121,14 @@ def render_menu_buttons(term: blessed.Terminal, selected_idx: int):
 
     for idx, item in enumerate(MENU_ITEMS):
         name = item["name"]
-        is_selected = (idx == selected_idx)
-        
+        is_selected = idx == selected_idx
+
         # Give unselected and selected buttons distinct visual borders
         if is_selected:
             btn_str = f"[>{name}<]"
         else:
             btn_str = f"[ {name} ]"
-            
+
         bx, by, _ = get_button_geometry(item, h, w)
 
         if by < h:
@@ -141,20 +141,21 @@ def render_menu_buttons(term: blessed.Terminal, selected_idx: int):
 
     print("".join(output), end="", flush=True)
 
-#Attatched functionality for buttons here
+
+# Attatched functionality for buttons here
 def handle_action(term, action):
     if action == "EXIT":
         return True
-    elif action == "SETTINGS":
+    elif action == "SETTINGS" or action == "JOIN GAME":
         # 1. Clear the entire screen to black
         term.clear()
-    
+
         # 2. Show only the centered message
         msg = f"Opening: {action}..."
         mx = max(0, (term.width - len(msg)) // 2)
         my = term.height // 2
         print(term.move_xy(mx, my) + term.black_on_white(msg), end="", flush=True)
-    
+
         # 3. Pause for a second, then trigger the settings configuration
         time.sleep(1)
         return False
@@ -180,7 +181,7 @@ def main():
 
     with term.cbreak(), term.hidden_cursor(), term.fullscreen(), term.mouse_enabled():
         size = (term.width, term.height)
-        
+
         # Draw the background and title once at startup
         render_static_background(term)
         render_menu_buttons(term, selected_idx)
@@ -230,6 +231,7 @@ def main():
                             render_static_background(term)
                             render_menu_buttons(term, selected_idx)
                         break
+
 
 if __name__ == "__main__":
     main()
