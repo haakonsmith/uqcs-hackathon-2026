@@ -621,6 +621,11 @@ class App:
                     # A new round is a new problem: last round's verdict is no
                     # longer "the last one" and [v] must not resurrect it.
                     self.last_verdict = None
+                    # And the draft still holds the last problem's statement
+                    # and the answer to it, so [s] would open the wrong
+                    # instructions over a solution to something else.
+                    if self.draft is not None:
+                        self.draft.reset(_starter(round_state))
                 if self.round is None or round_state.phase != self.round.phase:
                     # A new phase clears whatever the last one was saying, so
                     # a stale verdict cannot sit over the new instructions.
