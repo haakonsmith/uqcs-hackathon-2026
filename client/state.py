@@ -70,7 +70,7 @@ class App:
             return
 
         owner = self.world.territories[cell.territory]
-        detail = f"territory {owner.id}, continent {owner.continent}, {len(owner.neighbours)} neighbours"
+        detail = f"territory {owner.id}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
         self.hover = f"{where} - {detail}"
         self.highlights[owner.id] = True
 

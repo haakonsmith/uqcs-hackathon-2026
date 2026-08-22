@@ -2,6 +2,9 @@
 
     python client.py
 
+The menu is arrow keys or the mouse; JOIN GAME asks for a username and
+connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
+
 The board is larger than the terminal, so only a slice is on screen. Arrow
 keys and the mouse wheel scroll it (shift+wheel scrolls sideways), `+` and
 `-` zoom in and out by subsampling, the mouse inspects the cell under the
@@ -34,7 +37,7 @@ from client.input import (
     pump_server,
     watch_resize,
 )
-from client.menu import JoinGame, OpenSettings, Quit, notice, run_menu
+from client.menu import JoinGame, Quit, notice, run_menu
 from client.state import App
 from protocol import Connection, Join, JoinRejected
 
@@ -62,14 +65,14 @@ async def play(app: App, events: asyncio.Queue[AppEvent]) -> None:
             app.draw()
 
 
-async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address: str) -> None:
+async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address: str, username: str) -> None:
     """Connect, join a room, then hand the board the live connection.
 
     Anything that goes wrong here is reported on the menu rather than raised:
     a wrong address or a server that isn't up is a normal thing to do, not a
     crash.
     """
-    notice(term, f"connecting to {address} ...")
+    notice(term, f"{username} connecting to {address} ...")
     try:
         socket = await asyncio.wait_for(websockets.connect(address), timeout=5.0)
     except (TimeoutError, OSError, websockets.InvalidURI) as error:
@@ -121,11 +124,8 @@ async def main() -> None:
         try:
             while True:
                 match await run_menu(term, events):
-                    case JoinGame(address=address):
-                        await join(term, events, address)
-                    case OpenSettings():
-                        notice(term, "no settings yet")
-                        await asyncio.sleep(1)
+                    case JoinGame(address=address, username=username):
+                        await join(term, events, address, username)
                     case Quit():
                         return
         finally:

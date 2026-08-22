@@ -82,10 +82,8 @@ def status(world: terrain.WorldMap, view: Viewport, hover: str) -> str:
 
 def describe(world: terrain.WorldMap) -> None:
     """Poke at the board the way game logic would. Printed on exit."""
-    print(terrain.summary(world))
-
     home = world.territories[0]
-    print(f"\nterritory {home.id} sits on continent {home.continent} and covers {home.size} cells")
+    print(f"territory {home.id} covers {home.size} cells and holds {home.soldiers} soldiers")
     print(f"  borders by land: {sorted(home.land_neighbours)}")
     print(f"  reachable by sea: {sorted(home.sea_neighbours)}")
 
