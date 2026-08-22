@@ -10,6 +10,5 @@ def listen_to_server():
         for message in websocket:
             print(f"<<< {message}");
 
-
 if __name__ == "__main__":
   listen_to_server();

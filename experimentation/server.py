@@ -1,4 +1,3 @@
-
 import asyncio
 import time
 import random
@@ -21,7 +20,6 @@ def createWorld():
         "numTerritories": 0
     }
 
-
 class territory:
     def __init__(self, name, id):
         self.name = name;
@@ -33,7 +31,6 @@ def createTerritory(name, id): #no arguments for now
         "id": id,
         "colour": random.randint(1, 15), #maybe int represents colour, like 1=blue (random for now)
     }
-
 
 async def startMenu(websocket):
     content = await websocket.recv();
@@ -72,3 +69,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
