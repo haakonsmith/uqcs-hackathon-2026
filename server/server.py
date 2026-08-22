@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import json
 import logging
 from dataclasses import dataclass
@@ -42,7 +43,7 @@ class Server:
 
                     match event.action:
                         case "echo":
-                            await websocket.send(json.dumps(ServerAction(action="echo", payload=None)))
+                            await websocket.send(json.dumps(dataclasses.asdict(ServerAction(action="echo", payload=None))))
 
                     print(f"got event {event}")
             except Exception as e:
