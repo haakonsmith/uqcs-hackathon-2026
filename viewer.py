@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 import blessed
 
-from client import terrain
 from client.render import CELL_WIDTH, Color, territory_color
+from server import world as terrain
 
 VIEWS = ("terrain", "territories", "height")
 
