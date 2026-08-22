@@ -236,16 +236,42 @@ def test_an_unmarked_territory_says_nothing_extra(app: App) -> None:
     assert "took it" not in app.hover
 
 
-def test_a_marked_territory_gives_up_its_terrain_detail_for_the_note(app: App) -> None:
-    """The line is shared with the key hints; the note earns the space."""
+def test_the_hover_says_nothing_about_the_tile_under_the_cursor(app: App) -> None:
+    """Terrain and height decide how the board is generated, not how it plays."""
     point_at(app, 1)
     app.refresh_hover()
-    assert "height" in app.hover
+    for tile_detail in ("height", "grass", "(1,0)"):
+        assert tile_detail not in app.hover, app.hover
 
-    app.battle_notes = {1: "Guus took it from you"}
+
+def test_the_hover_says_who_holds_it_and_how_strongly(app: App) -> None:
+    point_at(app, 1)
     app.refresh_hover()
-    assert "height" not in app.hover
-    assert "Guus took it from you" in app.hover
+    assert "territory 1" in app.hover
+    assert "2 soldiers" in app.hover
+
+
+def test_the_hover_counts_what_this_phase_would_add(app: App) -> None:
+    app.placements = {1: 3}
+    point_at(app, 1)
+    app.refresh_hover()
+    assert "+3 placed" in app.hover
+
+
+def test_pointing_at_open_water_says_there_is_nothing_there(app: App) -> None:
+    app.world.grid[0][1].territory = None
+    point_at(app, 1)
+    app.refresh_hover()
+    assert app.hover == "nothing here"
+
+
+def test_open_water_still_reports_a_keyboard_pick(app: App) -> None:
+    """The pick is a standing choice; the mouse wandering off it changes nothing."""
+    app.world.grid[0][1].territory = None
+    app.selected = 2
+    point_at(app, 1)
+    app.refresh_hover()
+    assert "territory 2" in app.hover
 
 
 def test_the_keyboard_pick_reports_the_note_too(app: App) -> None:
@@ -289,26 +315,42 @@ def test_the_pick_is_drawn_over_a_mark(app: App) -> None:
     assert app.highlights[1] == (245, 245, 245)
 
 
-def test_the_key_hints_survive_an_overlong_hover() -> None:
-    """`Screen.row` cuts at the width; the keys must not be what it cuts."""
-    from client.hud import bottom_bar
+def test_the_hover_and_the_keys_no_longer_share_a_row() -> None:
+    """They were cutting each other off on any terminal under ~120 columns."""
+    from client.state import HUD_ROWS
 
-    keys = "  [?] help  [q]uit "
-    bar = bottom_bar("x" * 500, keys, width=100)
-    assert bar.endswith(keys), "the only thing on screen saying what a player can do"
-    assert len(bar) == 100
+    assert HUD_ROWS == 3, "phase, hover and keys need a row each"
 
 
-def test_a_short_hover_is_left_alone() -> None:
-    from client.hud import bottom_bar
+def test_the_key_line_gives_up_hints_rather_than_being_cut(app: App) -> None:
+    """`Screen.row` cuts mid-word, and the tail is where [?] lives."""
+    from client import hud
 
-    bar = bottom_bar("grass", "  [q]uit ", width=100)
-    assert bar.startswith(" grass")
-    assert bar.endswith("  [q]uit ")
+    for width in (50, 60, 70, 80, 100, 200):
+        line = hud.key_line(app.round, width)
+        assert len(line) <= width or width < len("  [?] help  [q]uit "), (width, line)
+        assert "[?] help" in line, "the hint that leads to all the others"
+        assert "[q]uit" in line
 
 
-def test_a_terminal_narrower_than_the_keys_keeps_the_keys() -> None:
-    from client.hud import bottom_bar
+def test_a_wide_terminal_keeps_every_hint(app: App) -> None:
+    from client import hud
 
-    keys = "  [?] help  [q]uit "
-    assert bottom_bar("anything", keys, width=4) == keys
+    full = hud.key_line(app.round)
+    assert hud.key_line(app.round, 200) == full
+    for hint in hud.KEYS["commanding"]:
+        assert hint in full
+
+
+def test_the_least_useful_hint_is_the_first_to_go(app: App) -> None:
+    from client import hud
+
+    narrow = hud.key_line(app.round, 70)
+    assert "click to place" in narrow, "the core action survives"
+    assert "[p] all" not in narrow, "a convenience does not"
+
+
+def test_no_width_means_no_limit(app: App) -> None:
+    from client import hud
+
+    assert hud.key_line(app.round) == hud.key_line(app.round, 0)

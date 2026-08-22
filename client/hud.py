@@ -1,4 +1,7 @@
-"""The two lines under the board: what phase it is, and what to press.
+"""The three lines under the board: the phase, the pointer, and the keys.
+
+A row each. Two of them used to share one, and on any terminal narrower than
+about 120 columns that meant whichever was written second got cut off.
 
 Split out of `render` because it is the only part of the screen that reads the
 round rather than the terrain, and it changes every second while the rest of a
@@ -16,11 +19,15 @@ from protocol.lobby import MAX_NAME_LENGTH
 from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
 
 # The short version, for the bar under the board. Both input methods get a
-# mention: the mouse is faster, the keyboard is the one that always works on
-# a terminal with no mouse reporting. The full list lives behind [?].
-KEYS: dict[Phase, str] = {
-    "submitting": "[s]ubmit  [v] last panel  [f]inished",
-    "commanding": "[v] last panel  click to place  [1-9] how many  [p] all  [c]lear  [f]inished",
+# mention: the mouse is faster, the keyboard is the one that always works on a
+# terminal with no mouse reporting.
+#
+# Ordered most useful first. A row too narrow to hold them all keeps the front
+# and gives up the tail, so this is both the reading order and the order they
+# go in. Nothing is lost by dropping one: [?] always has the full list.
+KEYS: dict[Phase, tuple[str, ...]] = {
+    "submitting": ("[s]ubmit", "[f]inished", "[v] last panel"),
+    "commanding": ("click to place", "[1-9] how many", "[f]inished", "[v] last panel", "[c]lear", "[p] all"),
 }
 
 # Every binding, grouped, for the [?] panel. Phase-specific first, because
@@ -175,16 +182,28 @@ def _blocking(round_state: RoundState, me: str) -> str:
     return f"waiting on {len(others)} players"
 
 
-def key_line(round_state: RoundState | None) -> str:
-    """The keys that do something right now."""
-    # Only what this phase answers, plus the way to everything else. The rest
-    # used to be listed here and ran to 200 characters, which no terminal
-    # showed in full and which the [?] panel now covers properly.
-    common = "[?] help  [q]uit"
-    if round_state is None:
-        return f"  {common} "
+def key_line(round_state: RoundState | None, width: int = 0) -> str:
+    """The keys that do something right now, as many as `width` will hold.
 
-    return f"  {KEYS.get(round_state.phase, '')}   {common} "
+    Trimmed rather than truncated. The row is written with `Screen.row`, which
+    cuts at the terminal width, so a line that does not fit loses its tail
+    mid-word - and the tail is where [?] lives, the one hint that leads to all
+    the others. Dropping whole hints from the least useful end keeps what
+    survives readable and keeps [?] on screen at any width.
+
+    `width` of 0 means no limit, for callers that only want the full line.
+    """
+    common = "[?] help  [q]uit"
+    hints = list(KEYS.get(round_state.phase, ())) if round_state is not None else []
+
+    def render(kept: list[str]) -> str:
+        return f"  {'  '.join(kept)}   {common} " if kept else f"  {common} "
+
+    line = render(hints)
+    while hints and width and len(line) > width:
+        _ = hints.pop()
+        line = render(hints)
+    return line
 
 
 # Drawn instead of colour, so the result reads the same on a terminal that
@@ -278,17 +297,6 @@ def _outcome(battle: BattleReport, me: str) -> str:
         return f"{taker} took empty ground, {left}"
     loser = "you" if battle.defender == me else battle.defender_name
     return f"{taker} took it from {loser}, {left}"
-
-
-def bottom_bar(hover: str, keys: str, width: int) -> str:
-    """The hover slot and the key hints, sharing one row.
-
-    The keys keep their room and the hover gives way. `Screen.row` cuts at the
-    terminal width, so without a budget an overlong hover takes the key hints
-    off the right-hand end with it - and the hover is passing detail where the
-    keys are the only thing on screen saying what a player can do.
-    """
-    return f" {hover}"[: max(0, width - len(keys))] + keys
 
 
 def mark_note(battle: BattleReport, me: str) -> str:

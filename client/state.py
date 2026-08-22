@@ -86,7 +86,11 @@ def _wrap(text: str, width: int = 68) -> list[str]:
 
 
 # Status bars under the board: the round, then the hover text and keys.
-HUD_ROWS = 2
+# Phase, hover, keys - a row each. Two of them used to share, and on any
+# terminal narrower than about 120 columns that meant one of the two was cut
+# off: the key line alone runs to most of an 80-column row. A board row is a
+# cheap price for both being readable at every width.
+HUD_ROWS = 3
 
 
 @dataclass
@@ -186,12 +190,23 @@ class App:
     def _selection_text(self, fallback: str = "") -> str:
         """What the hover slot says when the mouse is not over the board."""
         if self.selected is not None:
-            held = self.world.territories[self.selected]
-            return (
-                f"picked {self.selected} ({held.soldiers} soldiers{self._placed_suffix(self.selected)})"
-                f"{self._mark_suffix(self.selected)}"
-            )
+            return f"picked {self._territory_text(self.selected)}"
         return fallback or "[n] to pick a territory, or use the mouse"
+
+    def _territory_text(self, territory_id: int) -> str:
+        """One territory, said the way a player thinks about it.
+
+        Who holds it, how strongly, what this phase's plan adds, and what the
+        last one did to it. Deliberately nothing about the tile under the
+        cursor: terrain and height decide how the board is generated and
+        nothing about how it is played, so a cell's label and elevation were
+        three quarters of this line and no part of any decision made from it.
+        """
+        territory = self.world.territories[territory_id]
+        side = self.factions.side_of.get(territory_id)
+        held = self.factions.label(side) if side is not None else "nobody"
+        soldiers = f"{territory.soldiers} soldiers{self._placed_suffix(territory_id)}"
+        return f"territory {territory_id} - {held}, {soldiers}{self._mark_suffix(territory_id)}"
 
     def _mark_suffix(self, territory_id: int) -> str:
         """` - you took it from Guus`, for ground the last phase fought over."""
@@ -228,24 +243,15 @@ class App:
             self.dirty = True
             return
 
-        # Terrain detail is decoration, and the line it sits on is shared with
-        # the key hints. A territory the last phase fought over has something
-        # better to say in that space.
-        marked = cell.territory is not None and cell.territory in self.battle_notes
-        where = f"({cell.x},{cell.y})" if marked else f"({cell.x},{cell.y}) {cell.terrain.label} height {cell.height:.2f}"
         if cell.territory is None:
-            self.hover = f"{where} - unclaimed"
+            # Open water, or ground no territory was cut from. Nothing can be
+            # done with it, so there is nothing to say about it.
+            self.hover = self._selection_text("nothing here")
             self.dirty = True
             return
 
-        owner = self.world.territories[cell.territory]
-        side = self.factions.side_of.get(owner.id)
-        held = self.factions.label(side) if side is not None else "nobody"
-        soldiers = f"{owner.soldiers} soldiers{self._placed_suffix(owner.id)}"
-        # Who holds it and how strongly. The neighbour count was here too and
-        # answered a question nobody asks while deciding a move.
-        self.hover = f"{where} - {held}, {soldiers}{self._mark_suffix(owner.id)}"
-        self.highlights[owner.id] = True
+        self.hover = self._territory_text(cell.territory)
+        self.highlights[cell.territory] = True
         self.dirty = True
 
     async def handle_key(self, key: Keystroke) -> None:
@@ -668,7 +674,8 @@ class App:
         # plus the keys that work right now.
         bars = [
             hud.phase_line(self.round, self.me, self.message),
-            hud.bottom_bar(self.hover, hud.key_line(self.round), frame.width),
+            f" {self.hover}",
+            hud.key_line(self.round),
         ]
         for offset, text in enumerate(bars):
             frame.row(view.drawn_rows + offset, text)
