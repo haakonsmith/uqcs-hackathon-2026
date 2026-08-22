@@ -503,6 +503,7 @@ dependencies = [
     { name = "blessed" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "uuid64" },
     { name = "websockets" },
 ]
 
@@ -518,6 +519,7 @@ requires-dist = [
     { name = "blessed", specifier = ">=1.48.0" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "pandas", specifier = ">=3.0.5" },
+    { name = "uuid64", specifier = ">=0.2.0" },
     { name = "websockets", specifier = ">=17.0.1" },
 ]
 
@@ -527,6 +529,12 @@ dev = [
     { name = "mypy", specifier = ">=2.3.1" },
     { name = "ruff", specifier = ">=0.16.4" },
 ]
+
+[[package]]
+name = "uuid64"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/62/f9ba192d4400667fb0f3a899cf40a0372de99e5a848558bcf9c4a42d021e/uuid64-0.2.0.tar.gz", hash = "sha256:0b94be28beeb9bed34d2e2d3f7f5c7bddc0b18bae54d3be3740e81b78218e325", size = 3715, upload-time = "2014-12-26T18:28:27.435Z" }
 
 [[package]]
 name = "wcwidth"

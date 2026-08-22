@@ -8,6 +8,7 @@ dependencies = [
     "blessed>=1.48.0",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
+    "uuid64>=0.2.0",
     "websockets>=17.0.1",
 ]
 
