@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import world
+from world import World
 from typing import assert_never
 from uuid import UUID, uuid4
 
@@ -35,22 +37,34 @@ class Server:
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
+        
+        self.map: World | None = None
+        self.targetMultiplayer = 4
+
+    def createWorld(self) -> World:
+        """Function that creates and assigns the world."""
+        self.map = world.create_world()
+        return self.map
 
     async def handle_request(self, ws: websockets.ServerConnection, request: ClientRequest) -> ServerResponse:
         """Answer one request. Returning the response keeps correlation out of
         the game logic - the caller tags it with the id it came in on."""
         match request:
-            case Join(room=room):
+            case Join():
                 player_id = uuid4()
                 self.players[player_id] = Player(player_id)
                 self.sessions[ws] = player_id
-                await self.broadcast(PlayerJoined(player_id=str(player_id), room=room), exclude=ws)
-                return Joined(player_id=str(player_id), room=room)
+                
+                await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
+                
+                if len(self.players) >= self.targetMultiplayer and self.map is None:
+                    self.createWorld()
+                return Joined(player_id=str(player_id), world=self.map)
+
             case Echo(text=text):
                 return Echoed(text=text)
+
             case _:
-                # Fails to type check the moment a request joins the union
-                # without a case here, rather than silently going unanswered.
                 assert_never(request)
 
     async def broadcast(self, event: ServerEvent, exclude: websockets.ServerConnection | None = None) -> None:
@@ -63,14 +77,17 @@ class Server:
 
     async def register_connection(self, websocket: websockets.ServerConnection) -> None:
         logger.info(f"Connection received from {websocket.id}")
+        
+        if len(self.connections) >= self.targetMultiplayer:
+            await websocket.close(code=1008, reason="lobby full")
+            return
+
         self.connections.add(websocket)
 
         async for message in websocket:
             try:
                 frame = parse_frame(message)
             except ValueError as error:
-                # Malformed or unknown message. Nothing to reply on, since the
-                # id lives inside the frame we just failed to read.
                 logger.error(f"Could not parse frame from {websocket.id}: {error}")
                 continue
 
@@ -78,15 +95,12 @@ class Server:
                 case ReqFrame(id=request_id, body=body):
                     await self._answer(websocket, request_id, body)
                 case _:
-                    # Only clients send requests; anything else means the peer
-                    # is confused, and silence would make that unfindable.
                     logger.warning(f"{websocket.id} sent a {frame.t} frame to the server")
 
     async def _answer(self, ws: websockets.ServerConnection, request_id: str, request: ClientRequest) -> None:
         try:
             response = await self.handle_request(ws, request)
         except Exception:
-            # One bad request must not take down the whole connection loop.
             logger.exception(f"Handling {type(request).__name__} failed")
             return
         await ws.send(dump_frame(ResFrame(id=request_id, body=response)))
@@ -113,3 +127,7 @@ class Server:
         ):
             logger.info("Server started")
             await asyncio.Future()
+
+if __name__ == "__main__":
+    server = Server()
+    asyncio.run(server.run())
