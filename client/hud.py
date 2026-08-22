@@ -70,20 +70,35 @@ RULES_HELP: list[str] = [
 ]
 
 
-def help_popup(round_state: RoundState | None) -> list[str]:
-    """Everything that does something, with the current phase first."""
+def help_popup(round_state: RoundState | None, rows: int = 999) -> list[str]:
+    """Everything that does something, with the current phase first.
+
+    `rows` is the terminal height. The panel is built in sections and the
+    least useful are dropped until it fits, because `render_panel` truncates
+    at the bottom - and the bottom is where "[any key] close" lives, so an
+    overlong panel is one a player cannot work out how to dismiss.
+    """
     phase = round_state.phase if round_state is not None else None
-    lines = ["HELP", ""]
+    footer = ["", "[any key] close"]
 
+    head: list[str] = ["HELP", ""]
     if phase is not None:
-        lines.append(f"{phase.upper()} - what you can do now")
-        lines += [f"  {key:<9} {what}" for key, what in PHASE_HELP[phase]]
-        lines.append("")
+        head.append(f"{phase.upper()} - what you can do now")
+        head += [f"  {key:<9} {what}" for key, what in PHASE_HELP[phase]]
+        head.append("")
 
-    lines.append("ANY TIME")
-    lines += [f"  {key:<9} {what}" for key, what in BOARD_HELP]
-    lines += ["", "HOW IT WORKS", *(f"  {line}" for line in RULES_HELP)]
-    return [*lines, "", "[any key] close"]
+    board = ["ANY TIME", *(f"  {key:<9} {what}" for key, what in BOARD_HELP)]
+    rules = ["", "HOW IT WORKS", *(f"  {line}" for line in RULES_HELP)]
+
+    # Two rows of padding from the panel border, and never the whole screen.
+    budget = max(8, rows - 2)
+    for sections in ([head, board, rules], [head, board], [head]):
+        lines = [line for section in sections for line in section]
+        if len(lines) + len(footer) <= budget:
+            return [*lines, *footer]
+
+    # Still too tall: keep the phase bindings, which is what was asked for.
+    return [*head[: budget - len(footer)], *footer]
 
 
 def clock(seconds: float) -> str:

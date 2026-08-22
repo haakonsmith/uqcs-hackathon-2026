@@ -1,8 +1,8 @@
 import os
 import platform
 import subprocess
-import time
 import tempfile
+import time
 
 
 def prompt_and_watch_file(initial_text=""):
@@ -56,7 +56,7 @@ def prompt_and_watch_file(initial_text=""):
             
           print("Changes detected! Editor window closed/saved.")
           break
-      except (PermissionError, IOError):
+      except (OSError, PermissionError):
         # PermissionError means the file is still actively locked/open in the editor.
         # We catch it and keep waiting until the editor closes and releases the lock.
         pass

@@ -211,7 +211,7 @@ class App:
         if key in ("?", "/"):
             # `/` too: `?` is shift+/ and getting the shift wrong should still
             # open the help rather than do nothing.
-            self.popup = hud.help_popup(self.round)
+            self.popup = hud.help_popup(self.round, self.term.height)
             self.dirty = True
             return
         if await self._handle_phase_key(key):
@@ -251,6 +251,16 @@ class App:
         if key == "f":
             await self._request(FinishPhase())
             return True
+
+        # How many troops the next place or order moves. Both phases, because
+        # both spend troops a handful at a time and the bar offers [1-9] in
+        # each; wiring it to only one made the other silently place one.
+        if phase in ("allocating", "moving") and key.isdigit() and key != "0":
+            self.move_count = int(key)
+            verb = "place" if phase == "allocating" else "send"
+            self._say(f"next {verb}s {self.move_count}")
+            return True
+
         if phase == "submitting" and key == "s":
             await self._submit()
             return True
@@ -258,10 +268,6 @@ class App:
             await self._place(None if key == "p" else self.move_count)
             return True
         if phase == "moving":
-            if key.isdigit() and key != "0":
-                self.move_count = int(key)
-                self._say(f"next order sends {self.move_count}")
-                return True
             if key == "m":
                 await self._order()
                 return True
