@@ -143,6 +143,35 @@ BANK: tuple[Entry, ...] = (
     Entry(
         problem=Problem(
             id="EZ 005",
+            title="K-Permutations",
+            statement="Read an integer k on the first line. Read a space-separated list of numbers on the second line. Print a list of all possible k-length permutations of the given numbers, where each permutation is represented as a tuple.",
+            signature="stdin: integer k, newline, space-separated integers -> stdout: string representation of a list of tuples",
+            examples=[("2\n1 2 3", "[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]")],
+        ),
+        tests=(
+            TestCase("2\n1 2 3", "[(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)]"),
+            TestCase("1\n7 8 9", "[(7,), (8,), (9,)]"),
+            TestCase("3\n1 2 3", "[(1, 2, 3), (1, 3, 2), (2, 1, 3), (2, 3, 1), (3, 1, 2), (3, 2, 1)]"),
+            TestCase("2\n4 4", "[(4, 4), (4, 4)]"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 004",
+            title="Full Name Joiner",
+            statement="Read a first name and a last name separated by a space. Print them back separated by a comma and a space in the format 'LastName, FirstName'.",
+            signature="stdin: two space-separated strings -> stdout: one combined string",
+            examples=[("John Smith", "Smith, John")],
+        ),
+        tests=(
+            TestCase("John Smith", "Smith, John"),
+            TestCase("Alice Green", "Green, Alice"),
+            TestCase("A B", "B, A"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 005",
             title="Double Trouble",
             statement="Read a single integer N. Print its value multiplied by 2.",
             signature="stdin: one integer -> stdout: one integer",
