@@ -34,7 +34,6 @@ logger = logging.getLogger("Server")
 class Server:
 
     connections: set[websockets.ServerConnection]
-    game: WorldMap | None
     players: dict[UUID, Player]
     sessions: dict[websockets.ServerConnection, UUID]
     map: WorldMap | None
@@ -42,18 +41,12 @@ class Server:
 
     def __init__(self) -> None:
         self.connections: set[websockets.ServerConnection] = set()
-        self.game: None = None  # put your game state here!
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
         
-        self.map: World | None = None
+        self.map: World = world.create_world()
         self.player_count = 4
-
-    def createWorld(self) -> World:
-        """Function that creates and assigns the world."""
-        self.map = world.create_world()
-        return self.map
 
     async def handle_request(self, ws: websockets.ServerConnection, request: ClientRequest) -> ServerResponse:
         """Answer one request. Returning the response keeps correlation out of
@@ -65,9 +58,6 @@ class Server:
                 self.sessions[ws] = player_id
                 
                 await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
-                
-                if len(self.players) >= self.player_count and self.map is None:
-                    self.createWorld()
                 return Joined(player_id=str(player_id), world=self.map)
 
             case Echo(text=text):
