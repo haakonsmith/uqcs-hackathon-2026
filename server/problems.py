@@ -225,6 +225,21 @@ Entry(
     ),
 )
 ,
+Entry(
+    problem=Problem(
+        id="EZ 009",
+        title="Two Sum Baseline",
+        statement="Read two space-separated integers, A and B. Print their sum (A + B).",
+        signature="stdin: two space-separated integers -> stdout: one integer",
+        examples=[("5 7", "12")],
+    ),
+    tests=(
+        TestCase("5 7", "12"),
+        TestCase("0 0", "0"),
+        TestCase("-3 8", "5"),
+        TestCase("-10 -20", "-30"),
+    ),
+),
     Entry(
         problem=Problem(
             id="dice-odds",
