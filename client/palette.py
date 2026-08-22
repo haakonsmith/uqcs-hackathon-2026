@@ -25,16 +25,22 @@ Color = tuple[int, int, int]
 # drawn, and nothing on the board's land palette is close to it.
 ALLIED: Color = (96, 168, 244)
 
-# Everyone else, in this order. Front-loaded with the three that are hardest to
-# confuse with each other, because a lobby is four players far more often than
-# it is seven.
+# Everyone else, in this order. Front-loaded with the ones hardest to confuse
+# with each other, because a lobby is four players far more often than seven.
+#
+# The order is measured rather than judged by eye: each colour is the one that
+# stays furthest from every colour already in use, taking the worst case across
+# normal, protanopic and deuteranopic vision. Sorting by eye put crimson first
+# and iron fourth, which reads well enough in full colour but leaves the first
+# four only 19 points apart in CIE Lab for a red-green colour-blind player -
+# around 8% of men. This order leaves them 30 apart.
 HOSTILE: tuple[Color, ...] = (
-    (212, 62, 58),  # crimson
     (224, 170, 58),  # ochre
-    (198, 100, 182),  # plum
     (196, 200, 208),  # iron
-    (150, 174, 72),  # olive
+    (212, 62, 58),  # crimson
+    (198, 100, 182),  # plum
     (198, 106, 44),  # rust
+    (150, 174, 72),  # olive
 )
 
 

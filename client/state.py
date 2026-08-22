@@ -151,6 +151,19 @@ class App:
             self.round = replace(self.round, seconds_left=max(0.0, self.round.seconds_left - 1.0))
             self.dirty = True
 
+    def invalidate(self) -> None:
+        """Forget what is on screen, so the next frame is written in full.
+
+        For when something other than `draw` has written to the terminal - an
+        editor taking it over, say. The diff is against what this believes is
+        displayed, and once a stranger has drawn over that, every cell whose
+        stale model happens to match is skipped and the leftovers stay put.
+        A resize needs no such call: the frame sizes disagree, which `render`
+        already treats as nothing in common.
+        """
+        self._shown = None
+        self.dirty = True
+
     def fit(self) -> None:
         """Size the viewport to the terminal and refresh what follows from it."""
         self.view.fit(self.term.width, self.term.height, self.world, reserved=HUD_ROWS)
@@ -327,8 +340,10 @@ class App:
             self._say(f"could not start your editor: {error}")
             return
         finally:
-            # The board was handed to the editor, so none of it is still on
-            # screen, and the next frame is composed from scratch anyway.
+            # The editor owned the terminal and drew whatever it liked, so
+            # what this believes is on screen is now fiction. It also may have
+            # been resized while the board was not being drawn.
+            self.invalidate()
             self.fit()
 
         if not code.strip():
