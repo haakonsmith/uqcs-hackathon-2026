@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import assert_never
 from uuid import UUID, uuid4
+from PlaySound import beep
 
 import websockets
 from websockets.asyncio.server import serve
@@ -274,6 +275,7 @@ class Server:
             while self.round is not None:
                 await asyncio.sleep(CLOCK_TICK)
                 if self.round is not None and self.round.should_advance():
+                    beep()
                     await self._advance()
         except asyncio.CancelledError:
             raise
