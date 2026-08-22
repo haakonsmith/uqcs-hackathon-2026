@@ -68,6 +68,24 @@ BANK: tuple[Entry, ...] = (
     ),
     Entry(
         problem=Problem(
+            id="remove-duplicates",
+            title="Remove Duplicates",
+            statement=(
+                "Read in a list of integers separated by spaces. Print the list with all duplicate values removed."
+            ),
+            signature="stdin: 'a c c d e' -> stdout: 'a c d e'",
+            examples=[("5 5 8 5 5", "5 8"), ("1 2 3 4 4", "1 2 3 4")],
+        ),
+        tests=(
+            TestCase("23 83 43 43 43", "23 83 43"),
+            TestCase("1 2 3", "1 2 3"),
+            TestCase("1 1 1 1", "1"),
+            TestCase("5 5 8 5 5", "5 8"),
+            TestCase("9 0 10 233", "9 0 10 233"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
             id="EZ 001",
             title="Echo Echo",
             statement="Read a single word from input. Print it back three times separated by spaces.",
