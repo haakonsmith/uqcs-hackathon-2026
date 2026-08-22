@@ -17,7 +17,7 @@ stays acyclic. Import from this package rather than the submodules.
 from protocol.actions import (
     Acknowledged,
     BoardChanged,
-    CancelOrders,
+    CancelPlan,
     ClientRequest,
     Echo,
     Echoed,
@@ -31,9 +31,8 @@ from protocol.actions import (
     LobbyChanged,
     MovesResolved,
     MoveTroops,
-    Ordered,
-    Placed,
     PlaceTroops,
+    Planned,
     ReadySet,
     Refused,
     RoundChanged,
@@ -54,7 +53,19 @@ from protocol.frames import (
     parse_frame,
 )
 from protocol.lobby import Lobby, LobbyPlayer
-from protocol.rounds import BattleReport, CaseResult, CaseStatus, MoveOrder, Phase, PlayerRound, Problem, RoundState, TerritoryUpdate, Verdict
+from protocol.rounds import (
+    BattleReport,
+    CaseResult,
+    CaseStatus,
+    MoveOrder,
+    Phase,
+    Placement,
+    PlayerRound,
+    Problem,
+    RoundState,
+    TerritoryUpdate,
+    Verdict,
+)
 from protocol.terrain import TerrainInfo, TerritoryState, World
 
 __all__ = [
@@ -62,7 +73,7 @@ __all__ = [
     "Acknowledged",
     "BattleReport",
     "BoardChanged",
-    "CancelOrders",
+    "CancelPlan",
     "CaseResult",
     "CaseStatus",
     "ClientRequest",
@@ -84,10 +95,10 @@ __all__ = [
     "MoveOrder",
     "MoveTroops",
     "MovesResolved",
-    "Ordered",
     "Phase",
     "PlaceTroops",
-    "Placed",
+    "Placement",
+    "Planned",
     "PlayerRound",
     "Problem",
     "ProtocolError",

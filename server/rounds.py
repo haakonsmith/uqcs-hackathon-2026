@@ -7,11 +7,17 @@ clock wound forward by hand.
 
 The loop is:
 
-    submitting -> allocating -> moving -> submitting -> ...
+    submitting -> commanding -> submitting -> ...
 
 Each phase has a deadline. `submitting` also ends early once somebody solves
-the problem, after a grace period that gives everyone else a last go, and any
-phase ends early once every player still in the game says they are done.
+the problem, after a grace period that gives everyone else a last go, and
+either phase ends early once every player still in the game says they are done.
+
+`commanding` is one phase doing what placing and marching used to do in two, so
+a round hands troops out once and spends them once. Nothing it is told happens
+when it is told: placements and orders go into `plan` and are carried out
+together when the phase closes, which is why `place` writes no soldiers onto
+the board and why cancelling gives them back rather than taking them off it.
 """
 
 from __future__ import annotations
@@ -23,12 +29,12 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from protocol.rounds import (
-    ALLOCATE_SECONDS,
+    COMMAND_SECONDS,
     GRACE_SECONDS,
-    MOVE_SECONDS,
     SUBMIT_SECONDS,
     MoveOrder,
     Phase,
+    Placement,
     PlayerRound,
     Problem,
     RoundState,
@@ -44,14 +50,12 @@ logger = logging.getLogger("Rounds")
 
 PHASE_SECONDS: dict[Phase, float] = {
     "submitting": SUBMIT_SECONDS,
-    "allocating": ALLOCATE_SECONDS,
-    "moving": MOVE_SECONDS,
+    "commanding": COMMAND_SECONDS,
 }
 
 NEXT_PHASE: dict[Phase, Phase] = {
-    "submitting": "allocating",
-    "allocating": "moving",
-    "moving": "submitting",
+    "submitting": "commanding",
+    "commanding": "submitting",
 }
 
 # Troops for turning up, before anything is earned by solving.
@@ -102,9 +106,9 @@ class Round:
     progress: dict[UUID, Progress] = field(default_factory=dict)
 
     deadline: float = 0.0
-    # Marching orders for the phase in progress, resolved all at once when
-    # it ends. Empty outside the moving phase.
-    orders: combat.Orders = field(default_factory=combat.Orders)
+    # Placements and marching orders for the phase in progress, carried out all
+    # at once when it ends. Empty outside the commanding phase.
+    plan: combat.Plan = field(default_factory=combat.Plan)
     _grace_started: bool = False
 
     def start(self, players: dict[UUID, str]) -> None:
@@ -162,19 +166,24 @@ class Round:
         return verdict
 
     def place(self, player_id: UUID, territory: int, count: int) -> int:
-        """Put troops on the board. Returns how many the player has left."""
+        """Promise troops to a territory. Returns how many the player has left.
+
+        Nothing reaches the board here. The placement joins the plan and lands
+        when the phase ends, so a reinforcement is as secret as a march and can
+        be torn up as cheaply as one.
+        """
         progress = self._require(player_id)
-        if self.phase != "allocating":
-            raise combat.IllegalMove("troops are only placed during the allocating phase")
-        if count < 1:
-            raise combat.IllegalMove("place at least one soldier")
+        if self.phase != "commanding":
+            raise combat.IllegalMove("troops are only placed during the commanding phase")
+
+        combat.check_placement(self.board, player_id, territory, count)
         if count > progress.troops:
             raise combat.IllegalMove(f"you have {progress.troops} troops, not {count}")
 
-        combat.place(self.board, player_id, territory, count)
+        self.plan.place(player_id, territory, count)
         progress.troops -= count
-        if progress.troops == 0:
-            progress.done = True
+        # Committing troops is a change of mind about being finished.
+        progress.done = False
         return progress.troops
 
     def order(self, player_id: UUID, source: int, target: int, count: int) -> list[MoveOrder]:
@@ -184,23 +193,29 @@ class Round:
         has committed to without keeping its own copy in step.
         """
         progress = self._require(player_id)
-        if self.phase != "moving":
-            raise combat.IllegalMove("troops are only moved during the moving phase")
+        if self.phase != "commanding":
+            raise combat.IllegalMove("troops are only moved during the commanding phase")
 
         order = MoveOrder(source=source, target=target, count=count)
-        combat.validate(self.board, self.orders, player_id, order)
-        self.orders.add(player_id, order)
-        # Giving an order is a change of mind about being finished.
+        combat.validate(self.board, self.plan, player_id, order)
+        self.plan.add(player_id, order)
         progress.done = False
-        return self.orders.for_player(player_id)
+        return self.plan.orders_for(player_id)
 
-    def cancel_orders(self, player_id: UUID) -> list[MoveOrder]:
-        _ = self._require(player_id)
-        self.orders.clear(player_id)
-        return []
+    def cancel_plan(self, player_id: UUID) -> None:
+        """Tear up the phase: orders forgotten, placed troops back in hand."""
+        progress = self._require(player_id)
+        progress.troops += self.plan.clear(player_id)
 
     def orders_for(self, player_id: UUID) -> list[MoveOrder]:
-        return self.orders.for_player(player_id)
+        return self.plan.orders_for(player_id)
+
+    def placements_for(self, player_id: UUID) -> list[Placement]:
+        return self.plan.placements_for(player_id)
+
+    def troops_left(self, player_id: UUID) -> int:
+        """Troops earned this round and not yet promised to a territory."""
+        return self._require(player_id).troops
 
     def finish(self, player_id: UUID) -> None:
         self._require(player_id).done = True
@@ -208,6 +223,9 @@ class Round:
     def drop(self, player_id: UUID) -> None:
         """Forget a player who has disconnected, so nobody waits on them."""
         _ = self.progress.pop(player_id, None)
+        # Their plan goes with them: carrying out orders for somebody who left
+        # would move troops the room has no opponent to attribute to.
+        _ = self.plan.clear(player_id)
 
     # ------------------------------------------------------------------
     # Phases
@@ -216,16 +234,16 @@ class Round:
     def advance(self) -> combat.Resolution | None:
         """Close the current phase and open the next.
 
-        Returns what the marching orders did, when there were any: the caller
-        has to push the battles and the board delta before anyone sees the new
-        phase, or the board on screen disagrees with the story told about it.
+        Returns what the plan did, when there was one: the caller has to push
+        the battles and the board delta before anyone sees the new phase, or the
+        board on screen disagrees with the story told about it.
         """
         resolution: combat.Resolution | None = None
         if self.phase == "submitting":
             self._award_troops()
-        elif self.phase == "moving":
-            resolution = combat.resolve(self.board, self.orders, self.names())
-            self.orders = combat.Orders()
+        elif self.phase == "commanding":
+            resolution = combat.resolve(self.board, self.plan, self.names())
+            self.plan = combat.Plan()
             for battle in resolution.battles:
                 logger.info(battle.summary())
 
@@ -254,13 +272,13 @@ class Round:
         self.phase = phase
         self.deadline = time.monotonic() + PHASE_SECONDS[phase]
         for progress in self.progress.values():
-            # A player with nothing to place is done before the phase starts,
-            # or an all-solved room would sit through the whole allocation
-            # clock waiting for troops nobody has.
-            progress.done = phase == "allocating" and progress.troops == 0
-        if phase == "allocating":
+            # Nobody has said anything about a phase that has just opened. A
+            # player with no troops to place is not finished either, now that
+            # the same phase is the one they march in.
+            progress.done = False
+        if phase == "commanding":
             # The problem is done with; keeping it would leave it on screen
-            # through phases that have nothing to submit to.
+            # through a phase that has nothing to submit to.
             self.problem = None
 
     def _begin_grace(self, solver: Progress) -> None:
@@ -277,6 +295,10 @@ class Round:
         Everyone gets a base and a share for ground held, so a bad round is a
         setback rather than an elimination; the solution is what makes the
         difference between players.
+
+        The award replaces what a player is holding rather than adding to it:
+        troops earned for a round and never placed in it are gone, so there is
+        no saving them up for a turn with nothing else to spend on.
         """
         first = min(
             (p for p in self.progress.values() if p.solved_at is not None),

@@ -19,7 +19,7 @@ from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
 from protocol.lobby import Lobby
-from protocol.rounds import BattleReport, MoveOrder, RoundState, TerritoryUpdate, Verdict
+from protocol.rounds import BattleReport, MoveOrder, Placement, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
 
 # --------------------------------------------------------------------------
@@ -64,21 +64,23 @@ class Judged:
 
 
 @dataclass(frozen=True)
-class Placed:
-    """Troops accepted onto the board, with what is left to place."""
+class Planned:
+    """This player's plan for the phase, as it stands after being added to.
 
-    round: RoundState
-    remaining: int
-    kind: Literal["placed"] = "placed"
+    One answer for placing and for marching, because they spend the same
+    troops: a march can send soldiers placed this phase, so a client told about
+    one without the other would show a garrison it cannot account for.
 
+    Sent only to the player who made it, and never broadcast - a plan the room
+    can see is a plan nobody can be surprised by.
+    """
 
-@dataclass(frozen=True)
-class Ordered:
-    """Marching orders accepted. Nothing moves until the phase ends."""
-
+    placements: list[Placement]
     orders: list[MoveOrder]
+    # Troops earned this round and not yet promised to anywhere.
+    remaining: int
     round: RoundState
-    kind: Literal["ordered"] = "ordered"
+    kind: Literal["planned"] = "planned"
 
 
 @dataclass(frozen=True)
@@ -132,8 +134,12 @@ class SubmitSolution(Request[Judged | Refused]):
 
 
 @dataclass(frozen=True)
-class PlaceTroops(Request[Placed | Refused]):
-    """Put `count` of this round's troops onto a territory already owned."""
+class PlaceTroops(Request[Planned | Refused]):
+    """Promise `count` of this round's troops to a territory already owned.
+
+    Nothing reaches the board here. The troops join the plan and land when the
+    phase ends, so until then they are a `(+n)` on one player's screen.
+    """
 
     territory: int
     count: int = 1
@@ -141,7 +147,7 @@ class PlaceTroops(Request[Placed | Refused]):
 
 
 @dataclass(frozen=True)
-class MoveTroops(Request[Ordered | Refused]):
+class MoveTroops(Request[Planned | Refused]):
     """Order troops to a neighbouring territory, friendly or not.
 
     Queued rather than applied: everybody's orders resolve together when the
@@ -155,10 +161,14 @@ class MoveTroops(Request[Ordered | Refused]):
 
 
 @dataclass(frozen=True)
-class CancelOrders(Request[Ordered | Refused]):
-    """Tear up this player's orders for the phase."""
+class CancelPlan(Request[Planned | Refused]):
+    """Tear up this player's plan for the phase, placements and orders alike.
 
-    action: Literal["cancel_orders"] = "cancel_orders"
+    Placed troops go back into hand rather than onto the board: nothing has
+    happened yet, so there is nothing to take back off it.
+    """
+
+    action: Literal["cancel_plan"] = "cancel_plan"
 
 
 @dataclass(frozen=True)
@@ -248,11 +258,11 @@ class MovesResolved:
 # switch on the tag instead of trying each member in turn, which is both faster
 # and gives an error naming the tag rather than every failed candidate.
 ClientRequest = Annotated[
-    Join | SetReady | SubmitSolution | PlaceTroops | MoveTroops | CancelOrders | FinishPhase | Echo,
+    Join | SetReady | SubmitSolution | PlaceTroops | MoveTroops | CancelPlan | FinishPhase | Echo,
     Field(discriminator="action"),
 ]
 ServerResponse = Annotated[
-    Joined | JoinRejected | ReadySet | Judged | Placed | Ordered | Acknowledged | Refused | Echoed,
+    Joined | JoinRejected | ReadySet | Judged | Planned | Acknowledged | Refused | Echoed,
     Field(discriminator="kind"),
 ]
 ServerEvent = Annotated[

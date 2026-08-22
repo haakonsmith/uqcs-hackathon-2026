@@ -18,8 +18,7 @@ from protocol.terrain import WorldMap
 # a terminal with no mouse reporting. The full list lives behind [?].
 KEYS: dict[Phase, str] = {
     "submitting": "[s]ubmit  [v] last result  [f]inished",
-    "allocating": "click or [n][space] to place  [1-9] how many  [p] all  [f]inished",
-    "moving": "click source then target, or [n][m]  [1-9] how many  [c]ancel  [f]inished",
+    "commanding": "click to place  [m] march from here  [1-9] how many  [p] all  [c]lear  [f]inished",
 }
 
 # Every binding, grouped, for the [?] panel. Phase-specific first, because
@@ -30,20 +29,14 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("[v]", "show the last result again"),
         ("[f]", "finished - ends the phase once everyone is"),
     ],
-    "allocating": [
+    "commanding": [
         ("click", "place troops on your own territory"),
-        ("[n] [N]", "cycle through your territories"),
         ("[space]", "place on the picked territory"),
-        ("[1-9]", "how many a click or [space] places"),
         ("[p]", "place every troop you have left"),
-        ("[f]", "finished with this phase"),
-    ],
-    "moving": [
-        ("click", "source, then a neighbour, to queue a march"),
-        ("[n] [N]", "cycle territories, then neighbours"),
-        ("[m]", "same as clicking: source, then target"),
-        ("[1-9]", "troops the next order sends"),
-        ("[c]", "cancel every order you have queued"),
+        ("[m]", "march from here, then click a neighbour"),
+        ("[1-9]", "how many a place or a march moves"),
+        ("[n] [N]", "cycle your territories, then neighbours"),
+        ("[c]", "clear everything you have planned"),
         ("[esc]", "forget the source you picked"),
         ("[f]", "finished with this phase"),
     ],
@@ -60,13 +53,16 @@ BOARD_HELP: list[tuple[str, str]] = [
 ]
 
 RULES_HELP: list[str] = [
-    "A round is submit, then allocate, then move.",
+    "A round is submit, then command.",
     "Troops earned = 3 + territories/3 + up to 5 for your",
     "solution, +3 for solving first.",
-    "Orders are secret and all resolve together when the",
-    "moving phase ends: the biggest stack in a territory",
-    "takes it, losing as many troops as the next biggest.",
-    "A tie wipes both out and leaves it unowned.",
+    "Place them on your own ground and march out of it in",
+    "the one phase. Both are secret, shown to you as (+n)",
+    "beside a garrison, and both happen when the phase",
+    "ends: troops land first, so what you place can march",
+    "the same turn. The biggest stack in a territory takes",
+    "it, losing as many troops as the next biggest. A tie",
+    "wipes both out and leaves it unowned.",
 ]
 
 
@@ -118,7 +114,7 @@ def phase_line(round_state: RoundState | None, me: str, message: str) -> str:
         parts.append(round_state.problem.title)
         if mine is not None and mine.best is not None:
             parts.append(f"best {mine.best.passed}/{mine.best.total}")
-    elif round_state.phase == "allocating" and mine is not None:
+    elif round_state.phase == "commanding" and mine is not None and mine.troops:
         parts.append(f"{mine.troops} troops to place")
 
     waiting = round_state.waiting_on()
