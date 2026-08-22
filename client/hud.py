@@ -7,11 +7,15 @@ frame changes hardly at all.
 
 from __future__ import annotations
 
-import blessed
-
+from client.screen import Color, Screen
 from client.viewport import Viewport
 from protocol.rounds import BattleReport, Phase, RoundState, Verdict
 from protocol.terrain import WorldMap
+
+# White on the same blue the menu panels use, so an overlay reads as one
+# thing wherever it appears.
+PANEL_FG: Color = (255, 255, 255)
+PANEL_BG: Color = (28, 62, 122)
 
 # The short version, for the bar under the board. Both input methods get a
 # mention: the mouse is faster, the keyboard is the one that always works on
@@ -74,7 +78,7 @@ def help_popup(round_state: RoundState | None, rows: int = 999) -> list[str]:
     """Everything that does something, with the current phase first.
 
     `rows` is the terminal height. The panel is built in sections and the
-    least useful are dropped until it fits, because `render_panel` truncates
+    least useful are dropped until it fits, because `draw_panel` truncates
     at the bottom - and the bottom is where "[any key] close" lives, so an
     overlong panel is one a player cannot work out how to dismiss.
     """
@@ -217,18 +221,18 @@ def scoreboard(round_state: RoundState | None, me: str) -> list[str]:
     return rows
 
 
-def render_panel(term: blessed.Terminal, lines: list[str]) -> str:
-    """A boxed overlay in the middle of the board, for the scoreboard."""
-    width = max(len(line) for line in lines) + 4
-    width = min(width, term.width)
-    rows = ["", *lines, ""]
-    top = max(0, (term.height - len(rows)) // 2)
-    left = max(0, (term.width - width) // 2)
+def draw_panel(screen: Screen, lines: list[str]) -> None:
+    """A boxed overlay in the middle of the screen, for popups and scores."""
+    if not lines:
+        return
 
-    out: list[str] = []
+    width = min(max(len(line) for line in lines) + 4, screen.width)
+    rows = ["", *lines, ""]
+    top = max(0, (screen.height - len(rows)) // 2)
+    left = max(0, (screen.width - width) // 2)
+
     for index, text in enumerate(rows):
         y = top + index
-        if y >= term.height:
+        if y >= screen.height:
             break
-        out.append(term.move_xy(left, y) + term.bold_white_on_blue(text.center(width)[:width]))
-    return "".join(out)
+        screen.text(left, y, text.center(width)[:width], fg=PANEL_FG, bg=PANEL_BG, bold=True)

@@ -16,10 +16,12 @@ import blessed
 from blessed.keyboard import Keystroke
 
 from client import hud
+from client import screen as screen_module
 from client.editor import Draft, NoEditor, edit
 from client.input import SCROLL_KEYS, KeyPump, wheel_delta
 from client.palette import Factions
-from client.render import Highlight, garrison_panel, legend_panel, render
+from client.render import Highlight, draw_board, draw_garrisons, draw_legend
+from client.screen import Screen
 from client.viewport import Viewport
 from protocol import (
     Acknowledged,
@@ -98,7 +100,15 @@ class App:
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
     highlights: dict[int, Highlight] = field(default_factory=dict)
+    # Something changed and the frame should be composed again. Purely a CPU
+    # guard now: composing costs about 3 ms and the diff decides what actually
+    # reaches the terminal, so setting this when nothing changed wastes work
+    # but cannot put anything wrong on screen. That is the opposite of the
+    # per-component invalidation it replaced, where being wrong meant a stale
+    # board under a closed popup.
     dirty: bool = True
+    # The frame currently on the terminal, to diff the next one against.
+    _shown: Screen | None = None
     running: bool = True
 
     # Everything below is the round; without a connection the board is just a
@@ -161,16 +171,19 @@ class App:
 
         if self.cursor is None:
             self.hover = self._selection_text()
+            self.dirty = True
             return
 
         cell = self.view.cell_at(self.world, *self.cursor)
         if cell is None:
             self.hover = self._selection_text("off the board")
+            self.dirty = True
             return
 
         where = f"({cell.x},{cell.y}) {cell.terrain.label} height {cell.height:.2f}"
         if cell.territory is None:
             self.hover = f"{where} - unclaimed"
+            self.dirty = True
             return
 
         owner = self.world.territories[cell.territory]
@@ -179,12 +192,15 @@ class App:
         detail = f"territory {owner.id} held by {held}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
         self.hover = f"{where} - {detail}"
         self.highlights[owner.id] = True
+        self.dirty = True
 
     async def handle_key(self, key: Keystroke) -> None:
         """Act on a keystroke. Async, because most of them are requests."""
         moved = False
 
         if self.popup is not None:
+            # The panel was drawn over the terrain, so the terrain under it
+            # has to be drawn again to erase it.
             self.popup = None
             self.dirty = True
             return
@@ -302,7 +318,7 @@ class App:
             return
         finally:
             # The board was handed to the editor, so none of it is still on
-            # screen and a partial repaint would draw over whatever is.
+            # screen, and the next frame is composed from scratch anyway.
             self.fit()
 
         if not code.strip():
@@ -483,6 +499,8 @@ class App:
         delta = wheel_delta(key.name or "")
         if delta is not None:
             zoom = self.view.zoom
+            # Scrolling moves the terrain, so the caller's `moved` handling
+            # the view, which the caller turns into a redraw.
             return self.view.scroll(delta[0] * zoom, delta[1] * zoom, self.world)
 
         if (mx, my) != (-1, -1):
@@ -491,17 +509,24 @@ class App:
         return False
 
     def draw(self) -> None:
+        """Compose the whole frame, then write only what differs from the last.
+
+        Everything goes into one buffer - terrain, garrison counts, legend,
+        both bars, any popup - and the diff decides what reaches the terminal.
+        Nothing has to declare what it invalidated, because a composed frame
+        cannot disagree with itself: a popup that covered the board is simply
+        absent from the next frame, and those cells come back on their own.
+        """
         term, view = self.term, self.view
-        print(
-            term.home + render(term, self.world, view, self.bold_borders, self.highlights, self.factions),
-            end="",
-        )
-        # Both are laid over the board, so they follow it. Garrisons first:
-        # the legend is a solid box and should cover a count that lands under
-        # it rather than have digits printed across its rows.
-        print(garrison_panel(term, self.world, view, self.factions), end="")
+        frame = Screen(term.width, term.height)
+
+        draw_board(frame, self.world, view, self.bold_borders, self.highlights, self.factions)
+        # Garrisons before the legend: the legend is a solid box and should
+        # cover a count that lands under it, rather than have digits printed
+        # across its rows.
+        draw_garrisons(frame, self.world, view, self.factions)
         if self.legend:
-            print(legend_panel(term, view, self.factions), end="")
+            draw_legend(frame, view, self.factions)
 
         # Two bars: what the round is doing, and what the mouse is pointing at
         # plus the keys that work right now.
@@ -510,23 +535,16 @@ class App:
             f" {hud.where(self.world, view)}  {self.hover}" + hud.key_line(self.round, self.move_from),
         ]
         for offset, text in enumerate(bars):
-            row = view.drawn_rows + offset
-            if row < term.height:
-                print(term.move_xy(0, row) + term.ljust(text[: term.width]), end="")
-
-        # Zooming out shrinks the map below the window, so wipe whatever the
-        # previous frame left under the status bars. Skip it when they are
-        # already on the last rows: moving past the bottom clamps back onto
-        # them and the erase would take them with it.
-        if view.drawn_rows + len(bars) < term.height:
-            print(term.move_xy(0, view.drawn_rows + len(bars)) + term.clear_eos, end="")
+            frame.row(view.drawn_rows + offset, text)
 
         if self.popup is not None:
-            print(hud.render_panel(term, self.popup), end="")
+            hud.draw_panel(frame, self.popup)
         elif self.scoreboard:
-            print(hud.render_panel(term, hud.scoreboard(self.round, self.me)), end="")
+            hud.draw_panel(frame, hud.scoreboard(self.round, self.me))
 
+        _ = sys.stdout.write(screen_module.render(term, self._shown, frame))
         _ = sys.stdout.flush()
+        self._shown = frame
         self.dirty = False
 
     def apply_event(self, event: ServerEvent) -> None:

@@ -74,17 +74,28 @@ async def play(app: App, events: asyncio.Queue[AppEvent]) -> None:
     app.draw()
     # Only the board needs a second hand; the menu has nothing that counts down.
     ticker = asyncio.create_task(pump_clock(events))
+
+    async def apply(event: AppEvent) -> None:
+        match event:
+            case KeyPress(key=key):
+                await app.handle_key(key)
+            case Resized():
+                app.fit()
+            case Received(event=pushed):
+                app.apply_event(pushed)
+            case Tick():
+                app.tick()
+
     try:
         while app.running:
-            match await events.get():
-                case KeyPress(key=key):
-                    await app.handle_key(key)
-                case Resized():
-                    app.fit()
-                case Received(event=event):
-                    app.apply_event(event)
-                case Tick():
-                    app.tick()
+            await apply(await events.get())
+            # Drain whatever else already arrived before painting. Mouse
+            # motion comes in bursts, and drawing between each one is the
+            # same frame written many times over.
+            drained = 0
+            while app.running and not events.empty() and drained < COALESCE_LIMIT:
+                await apply(events.get_nowait())
+                drained += 1
 
             if app.dirty:
                 app.draw()
@@ -156,6 +167,10 @@ async def join(
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
+
+# How many queued events one frame may swallow. Bounded so that a source
+# producing events faster than the screen can be drawn still gets drawn.
+COALESCE_LIMIT = 64
 
 DEFAULT_PORT = 8888
 

@@ -6,9 +6,8 @@ import colorsys
 from collections import Counter
 from typing import TYPE_CHECKING
 
-import blessed
-
 from client.palette import Color, Factions, blend
+from client.screen import Screen
 from protocol import terrain
 
 if TYPE_CHECKING:
@@ -155,36 +154,46 @@ def frontier_side(world: terrain.WorldMap, factions: Factions, cell: terrain.Cel
     return None
 
 
-def render(
-    term: blessed.Terminal,
+def board_colors(
     world: terrain.WorldMap,
     view: Viewport,
     bold_borders: bool,
     highlights: dict[int, Highlight],
     factions: Factions,
-) -> str:
-    """Colour render of the visible slice, two columns per cell.
+) -> list[list[Color]]:
+    """The colour of every screen cell, without any escape sequences.
 
-    At zoom > 1 this steps over the grid rather than reading all of it, so the
-    work per frame is bounded by the screen, not by how much board is shown.
+    Separated from the drawing so a frame can be compared with the one before
+    it: two grids of tuples diff cheaply, two strings of escapes do not.
     """
     border_alpha = BORDER_ALPHA_BOLD if bold_borders else BORDER_ALPHA
-    lines: list[str] = []
+    grid: list[list[Color]] = []
     for row in world.grid[view.y : view.y + view.span_y : view.zoom]:
-        parts: list[str] = []
+        colors: list[Color] = []
         for cell in row[view.x : view.x + view.span_x : view.zoom]:
             color = cell_color(cell, highlights, factions)
             side = frontier_side(world, factions, cell, view.zoom)
             if side is not None:
                 color = blend(factions.colors[side], color, border_alpha)
-            parts.append(term.on_color_rgb(*color))
-            parts.append(" " * CELL_WIDTH)
-        # Reset first so the erase uses the default background, not the last
-        # cell's colour, then wipe anything the previous frame left to the right.
-        parts.append(term.normal)
-        parts.append(term.clear_eol)
-        lines.append("".join(parts))
-    return "\n".join(lines)
+            colors.append(color)
+        grid.append(colors)
+    return grid
+
+
+def draw_board(
+    screen: Screen,
+    world: terrain.WorldMap,
+    view: Viewport,
+    bold_borders: bool,
+    highlights: dict[int, Highlight],
+    factions: Factions,
+) -> None:
+    """Compose the visible slice of terrain into `screen`."""
+    for y, colors in enumerate(board_colors(world, view, bold_borders, highlights, factions)):
+        for x, color in enumerate(colors):
+            # Two columns per map cell, so terrain is not sheared vertically.
+            for column in range(CELL_WIDTH):
+                screen.set(x * CELL_WIDTH + column, y, (" ", None, color, False))
 
 
 def _readable_on(background: Color) -> Color:
@@ -213,16 +222,15 @@ def garrison_anchor(world: terrain.WorldMap, territory: terrain.Territory) -> tu
     return min(territory.cells, key=lambda cell: (cell[0] - centre_x) ** 2 + (cell[1] - centre_y) ** 2)
 
 
-def garrison_panel(term: blessed.Terminal, world: terrain.WorldMap, view: Viewport, factions: Factions) -> str:
+def draw_garrisons(screen: Screen, world: terrain.WorldMap, view: Viewport, factions: Factions) -> None:
     """How many soldiers sit on each visible territory, over its middle.
 
-    Laid over the board once it is drawn, the way the legend is, so the map
-    stays a plain grid of cells and no row has to leave room for text midway
-    along it.
+    Composed after the terrain, the way the legend is, so the map stays a
+    plain grid of cells and no row has to leave room for text midway along it.
 
-    Each count is a chip in its holder's colour rather than bare text: a cell
-    written after the board is painted takes whatever background is current,
-    so text drawn without one would punch a default-coloured hole in the map.
+    Each count carries its holder's colour as a background rather than being
+    bare text, so it reads as a chip on the map instead of a number floating
+    over whatever happens to be underneath.
 
     Labels that would overlap are dropped rather than overprinted, since two
     counts sharing a cell read as one number that belongs to neither. They are
@@ -231,7 +239,6 @@ def garrison_panel(term: blessed.Terminal, world: terrain.WorldMap, view: Viewpo
     """
     board_width = view.drawn_cols * CELL_WIDTH
     taken: set[tuple[int, int]] = set()
-    output: list[str] = []
 
     for territory in world.territories:
         # Unclaimed ground has no garrison to report, only a colour.
@@ -259,10 +266,7 @@ def garrison_panel(term: blessed.Terminal, world: terrain.WorldMap, view: Viewpo
         taken |= span
 
         background = side_color(factions, territory.id)
-        output.append(
-            term.move_xy(left, y) + term.on_color_rgb(*background) + term.color_rgb(*_readable_on(background)) + term.bold + label + term.normal
-        )
-    return "".join(output)
+        screen.text(left, y, label, fg=_readable_on(background), bg=background, bold=True)
 
 
 def _force_rows(factions: Factions) -> list[list[Segment]]:
@@ -308,16 +312,14 @@ def _box_fits(blocks: list[Block], view: Viewport) -> bool:
     return width + 2 <= view.drawn_cols * CELL_WIDTH and height <= view.drawn_rows
 
 
-def legend_panel(term: blessed.Terminal, view: Viewport, factions: Factions) -> str:
+def draw_legend(screen: Screen, view: Viewport, factions: Factions) -> None:
     """Which colour is whose and what to press, boxed over the top-right.
 
-    Laid over the map after it is drawn rather than blitted into it, so the map
-    stays a plain grid of cells. Drawn every frame because the frame under it
-    paints the whole board.
+    Composed over the map rather than blitted into it, so the map stays a
+    plain grid of cells.
 
     The keys are dropped, and then the whole box, when the board on screen is
-    too small to hold them: a box that overhangs the map would be half-erased
-    by the next `clear_eol`. Keys go first because which colour is whose cannot
+    too small to hold them. Keys go first because which colour is whose cannot
     be worked out from anywhere else, while the keys are also on the status bar.
     """
     blocks: list[Block] = [(LEGEND_TITLE, _force_rows(factions)), (KEYS_TITLE, _key_rows())]
@@ -326,29 +328,21 @@ def legend_panel(term: blessed.Terminal, view: Viewport, factions: Factions) -> 
     while blocks and not _box_fits(blocks, view):
         _ = blocks.pop()
     if not blocks:
-        return ""
+        return
 
     width, _height = _box_size(blocks)
     left = view.drawn_cols * CELL_WIDTH - width - 1
-    background = term.on_color_rgb(*LEGEND_BG)
-    foreground = term.color_rgb(*LEGEND_FG)
 
-    output: list[str] = []
     row_y = 0
     for title, rows in blocks:
-        output.append(term.move_xy(left, row_y) + background + foreground + term.bold + title.center(width) + term.normal)
+        screen.text(left, row_y, title.center(width), fg=LEGEND_FG, bg=LEGEND_BG, bold=True)
         row_y += 1
         for row in rows:
-            # Each row restates the background: `term.normal` at the end of the
-            # one before it clears the colour along with the bold and the swatch.
-            parts = [term.move_xy(left, row_y), background]
-            for text, color in row:
-                parts.append(term.color_rgb(*color) if color is not None else foreground)
-                parts.append(text)
             # Pad to the widest row, so a short one does not leave a notch of
             # bare map inside the box.
-            parts.append(" " * (width - _row_width(row)))
-            parts.append(term.normal)
-            output.append("".join(parts))
+            screen.text(left, row_y, " " * width, fg=LEGEND_FG, bg=LEGEND_BG)
+            column = left
+            for text, color in row:
+                screen.text(column, row_y, text, fg=color or LEGEND_FG, bg=LEGEND_BG)
+                column += len(text)
             row_y += 1
-    return "".join(output)
