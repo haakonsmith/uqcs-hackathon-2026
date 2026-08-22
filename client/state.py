@@ -148,6 +148,11 @@ class App:
     # can be refused. Drawn as the `(+n)` beside a garrison, and emptied when
     # the phase carries it out.
     placements: dict[int, int] = field(default_factory=dict)
+    # Territories the last resolution fought over, lit on the board until the
+    # next commanding phase opens. A popup can name where a battle was, but
+    # only the board can show it, and the popup is gone the moment a key is
+    # pressed - which is well before anybody has found the place on the map.
+    battle_marks: set[int] = field(default_factory=set)
 
     def tick(self) -> None:
         """A second passed: only the countdown on the phase bar changed."""
@@ -193,6 +198,10 @@ class App:
         board moves under a stationary mouse, so what it points at changes.
         """
         self.highlights = {}
+        # Under the pick rather than over it: the pick is a thing the player is
+        # doing now, and a mark is a thing that already happened.
+        for territory_id in self.battle_marks:
+            self.highlights[territory_id] = (200, 110, 45)
         if self.selected is not None:
             self.highlights[self.selected] = (245, 245, 245)
 
@@ -250,7 +259,14 @@ class App:
             self.dirty = True
             return
         if key.name == "KEY_ESCAPE":
+            # The one way back to no pick at all. Without it a territory chosen
+            # with [n] stays white for the rest of the game, because cycling
+            # only ever moves the pick to somewhere else.
+            if self.selected is not None:
+                self.selected = None
+                self._say("nothing picked")
             self.scoreboard = False
+            self.refresh_hover()
             self.dirty = True
             return
         if key in ("n", "N"):
@@ -312,7 +328,7 @@ class App:
                 self._say(f"next placement puts down {self.move_count}")
                 return True
             if key in (" ", "p"):
-                await self._place(None if key == "p" else self.move_count)
+                await self._place(self._target_territory(), None if key == "p" else self.move_count)
                 return True
             if key == "c":
                 await self._request(CancelPlan())
@@ -371,14 +387,17 @@ class App:
         self._say(f"submitting {len(code)} bytes ...")
         await self._request(SubmitSolution(code=code))
 
-    async def _place(self, count: int | None) -> None:
+    async def _place(self, territory: int | None, count: int | None) -> None:
         """Promise troops to a territory. `count` of None means all in hand.
 
-        Nothing lands on the board here either: the answer comes back as a
-        `(+n)` on the territory, and the troops arrive when the phase ends -
-        joining the garrison on your own ground, or assaulting it next door.
+        Told which territory rather than working it out, so a caller that
+        already knows - a click does - does not have to route the answer
+        through the keyboard pick to get it here.
+
+        Nothing lands on the board either: the answer comes back as a `(+n)` on
+        the territory, and the troops arrive when the phase ends - joining the
+        garrison on your own ground, or assaulting it next door.
         """
-        territory = self._target_territory()
         if territory is None:
             self._say("click a territory, or pick one with [n]")
             return
@@ -404,13 +423,15 @@ class App:
             self._say("nothing there")
             return
 
-        # `_place` reads the keyboard pick first, so pointing it at what was
-        # clicked is a matter of setting it.
-        self.selected = under
+        # Deliberately not `self.selected = under`. A click says where to put
+        # troops once; the keyboard pick is a standing choice, drawn white
+        # until something clears it. Making a click set it left every clicked
+        # territory highlighted for the rest of the phase.
         if self.round.phase != "commanding":
+            self.selected = under
             self.dirty = True
         else:
-            await self._place(self.move_count)
+            await self._place(under, self.move_count)
 
     def _hovered_territory(self) -> int | None:
         """The territory under the mouse, ignoring any keyboard pick."""
@@ -643,7 +664,16 @@ class App:
                     # a stale verdict cannot sit over the new instructions.
                     self.message = ""
                     self._forget_plan()
+                    if round_state.phase == "commanding":
+                        # Last round's fights stop being news the moment there
+                        # is a decision to make, and a board still lit up with
+                        # them is a board that is hard to plan on. They survive
+                        # the submitting phase, which is the whole point: a
+                        # player looks up from their editor and can still see
+                        # what happened to them.
+                        self.battle_marks = set()
                 self.round = round_state
+                self.refresh_hover()
                 self.dirty = True
             case BoardChanged(updates=updates):
                 for update in updates:
@@ -663,7 +693,9 @@ class App:
                 # Newer than any verdict from this round, so [v] should
                 # bring this back rather than the submission before it.
                 self.last_verdict = None
-                self._show_popup(hud.battles_popup(battles, dropped))
+                self.battle_marks = {b.territory for b in battles} | {d.territory for d in dropped}
+                self.refresh_hover()
+                self._show_popup(hud.battles_popup(battles, dropped, self.world, self.me))
                 self._say(f"{len(battles)} battles" if battles else "troops landed")
             case GameOver(name=name, winner=winner):
                 self._show_popup(hud.game_over_popup(name, winner))

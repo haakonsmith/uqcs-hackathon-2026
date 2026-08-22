@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from protocol.terrain import Territory, WorldMap
+from protocol.terrain import Cell, Terrain, Territory, WorldMap
 
 
 def board(*specs: tuple[UUID | None, int], links: dict[int, set[int]] | None = None) -> WorldMap:
@@ -27,7 +27,12 @@ def board(*specs: tuple[UUID | None, int], links: dict[int, set[int]] | None = N
     for territory in territories:
         wanted = links[territory.id] if links is not None else {i for i in range(count) if i != territory.id}
         territory.land_neighbours = set(wanted)
-    return WorldMap(width=count, height=1, grid=[[]], territories=territories)
+
+    # One row of cells, territory `i` at x == i. The rules never look at the
+    # grid, but anything driven through the cursor resolves a screen position
+    # to a cell, so it has to be a real one.
+    grid = [[Cell(x=i, y=0, height=0.5, terrain=Terrain.GRASS, territory=i) for i in range(count)]]
+    return WorldMap(width=count, height=1, grid=grid, territories=territories)
 
 
 @pytest.fixture

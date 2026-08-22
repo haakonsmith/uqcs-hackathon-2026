@@ -197,3 +197,65 @@ def test_a_stranger_holds_nothing(alice: UUID) -> None:
     assert combat.eliminated(board((alice, 3)), uuid4())
 
 
+
+
+# --------------------------------------------------------------------------
+# Who held the ground going in
+# --------------------------------------------------------------------------
+
+
+def test_a_battle_names_the_side_that_already_held_the_ground(alice: UUID, bob: UUID, names: dict[UUID, str]) -> None:
+    world = board((alice, 1), (bob, 4))
+    plan = Plan()
+    plan.place(alice, 1, 10)
+    (battle,) = resolve(world, plan, names).battles
+
+    assert battle.defender == str(bob)
+    assert battle.defender_name == "bob"
+    assert not battle.held, "bob lost it"
+
+
+def test_a_defender_who_survives_is_reported_as_holding(alice: UUID, bob: UUID, names: dict[UUID, str]) -> None:
+    world = board((alice, 1), (bob, 10))
+    plan = Plan()
+    plan.place(alice, 1, 4)
+    (battle,) = resolve(world, plan, names).battles
+
+    assert battle.winner == str(bob)
+    assert battle.held, "the ground never changed hands"
+    assert "held it" in battle.summary()
+
+
+def test_unowned_ground_has_no_defender(alice: UUID, bob: UUID, names: dict[UUID, str]) -> None:
+    world = board((alice, 1), (bob, 1), (None, 0))
+    plan = Plan()
+    plan.place(alice, 2, 5)
+    plan.place(bob, 2, 2)
+    (battle,) = resolve(world, plan, names).battles
+
+    assert battle.defender is None
+    assert battle.defender_name == "nobody"
+    assert not battle.held
+
+
+def test_a_wipe_out_still_names_the_side_that_held_it(alice: UUID, bob: UUID, names: dict[UUID, str]) -> None:
+    """The one outcome with no winner is also the one where losing it hurts."""
+    world = board((alice, 1), (bob, 7))
+    plan = Plan()
+    plan.place(alice, 1, 7)
+    (battle,) = resolve(world, plan, names).battles
+
+    assert battle.winner is None
+    assert battle.defender == str(bob)
+    assert not battle.held, "nobody held anything"
+
+
+def test_the_defender_is_read_before_the_board_is_written(alice: UUID, bob: UUID, names: dict[UUID, str]) -> None:
+    """`_settle` reassigns `territory.owner`; the report must predate that."""
+    world = board((alice, 1), (bob, 4))
+    plan = Plan()
+    plan.place(alice, 1, 10)
+    (battle,) = resolve(world, plan, names).battles
+
+    assert world.territories[1].owner == alice, "the board moved on"
+    assert battle.defender == str(bob), "the report did not"

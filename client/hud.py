@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
+from protocol import terrain
 from protocol.lobby import MAX_NAME_LENGTH
 from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
 
@@ -34,6 +35,7 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("[p]", "place every troop you have left"),
         ("[1-9]", "how many troops a placement puts down"),
         ("[n] [N]", "cycle your territories, then neighbours"),
+        ("[esc]", "let go of the picked territory"),
         ("[c]", "clear everything you have planned"),
         ("[f]", "finished with this phase"),
     ],
@@ -227,30 +229,106 @@ def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> 
     return [*lines, "", "[any key] close   [v] show this again"]
 
 
-def battles_popup(battles: list[BattleReport], dropped: list[DroppedOrder] | None = None) -> list[str]:
+# Where on the map a territory is, said the way somebody looking at the board
+# would say it. A territory id is the only handle the protocol has, and it is
+# no help at all to a player who has never seen one: the report used to open
+# "territory 15:" and leave them to find it.
+COMPASS: tuple[tuple[str, str, str], ...] = (
+    ("north-west", "north", "north-east"),
+    ("west", "middle", "east"),
+    ("south-west", "south", "south-east"),
+)
+
+
+def whereabouts(world: terrain.WorldMap, territory_id: int) -> str:
+    """A rough compass position, for naming a territory out loud."""
+    if not 0 <= territory_id < len(world.territories):
+        return f"territory {territory_id}"
+    territory = world.territories[territory_id]
+    if not territory.cells:
+        return f"territory {territory_id}"
+
+    x, y = territory.centroid
+    column = min(2, int(x * 3 / max(world.width, 1)))
+    row = min(2, int(y * 3 / max(world.height, 1)))
+    return f"the {COMPASS[row][column]}"
+
+
+def _outcome(battle: BattleReport, me: str) -> str:
+    """One line saying who ended up with the ground, and who lost it.
+
+    Taking ground and holding it are different results and used to read the
+    same, because the report could only name who owned the territory once the
+    dust settled. Naming the side that lost is the half a player feels: being
+    told "Mason holds it" when it was yours a moment ago is a fact about the
+    board, not about what happened to you.
+    """
+    if battle.winner is None:
+        lost = "yours" if battle.defender == me else f"{battle.defender_name}'s"
+        whose = f" - it was {lost}" if battle.defender is not None else ""
+        return f"nobody holds it{whose}, every side wiped out"
+
+    taker = "you" if battle.winner == me else battle.winner_name
+    left = f"{battle.survivors} left standing"
+    if battle.held:
+        return f"{taker} held it, {left}"
+    if battle.defender is None:
+        return f"{taker} took empty ground, {left}"
+    loser = "you" if battle.defender == me else battle.defender_name
+    return f"{taker} took it from {loser}, {left}"
+
+
+def battles_popup(
+    battles: list[BattleReport],
+    dropped: list[DroppedOrder] | None = None,
+    world: terrain.WorldMap | None = None,
+    me: str = "",
+) -> list[str]:
     """What the phase did, once every placement landed at once.
 
-    Placements that could not be carried out are listed under the battles
-    rather than left out. They put nothing on the board, so they reach the
-    delta as an absence: troops a player watched themselves commit that are
-    simply not there next round, with no way to tell a lost placement from a
-    lost fight.
+    Written from the reader's side. The same report goes to everybody, but the
+    thing each of them wants to know first is what happened to *them*, so their
+    own fights are listed first and their own stack is called "you". A list of
+    third-person names in territory-id order is the same information and much
+    harder to read your own game out of.
+
+    Placements that could not be carried out are listed underneath rather than
+    left out. They put nothing on the board, so they reach the delta as an
+    absence: troops a player watched themselves commit that are simply not
+    there next round, with no way to tell a lost placement from a lost fight.
     """
     dropped = dropped or []
     if not battles and not dropped:
-        return ["ORDERS CARRIED OUT", "", "nobody met anybody", "", "[any key] back to the board"]
+        return ["NOTHING MET", "", "every placement landed unopposed", "", "[any key] back to the board"]
 
-    lines = ["BATTLES", ""] if battles else []
-    for battle in battles:
-        sides = "  vs  ".join(f"{s.name} {s.troops}" for s in battle.stacks)
-        outcome = f"{battle.winner_name} holds it with {battle.survivors}" if battle.winner else "wiped out - unowned"
-        lines += [f"territory {battle.territory}: {sides}", f"    {outcome}"]
+    def place(territory_id: int) -> str:
+        where = whereabouts(world, territory_id) if world is not None else f"territory {territory_id}"
+        # The id stays, in brackets. Nobody navigates by it, but it is what the
+        # logs and the server say, so dropping it entirely makes the two
+        # impossible to line up when something looks wrong.
+        return f"{where}  ({territory_id})"
+
+    def mine(battle: BattleReport) -> bool:
+        return any(stack.owner == me for stack in battle.stacks)
+
+    lines: list[str] = []
+    if battles:
+        lines += ["BATTLES", ""]
+        # Yours first, then the rest in the order they were reported.
+        for battle in sorted(battles, key=lambda b: not mine(b)):
+            sides = "  vs  ".join(f"{'you' if s.owner == me else s.name} {s.troops}" for s in battle.stacks)
+            outcome = _outcome(battle, me)
+            lines += [f"  {place(battle.territory)}", f"    {sides}", f"    {outcome}", ""]
+        lines.pop()
 
     if dropped:
-        lines += ["", "NEVER HAPPENED", ""]
+        lines += ["", "NEVER LANDED", ""] if battles else ["NEVER LANDED", ""]
         for order in dropped:
-            lines += [f"{order.name}: {order.count} at territory {order.territory}", f"    {order.reason}"]
-    return [*lines, "", "[any key] back to the board"]
+            whose = "yours" if order.player == me else f"{order.name}'s"
+            lines += [f"  {order.count} of {whose} at {place(order.territory)}", f"    {order.reason}", ""]
+        lines.pop()
+
+    return [*lines, "", "the board marks these until you next command", "[any key] back to the board"]
 
 
 def game_over_popup(name: str, winner: str | None) -> list[str]:
