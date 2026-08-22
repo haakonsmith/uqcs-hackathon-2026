@@ -44,6 +44,20 @@ HOSTILE: tuple[Color, ...] = (
 )
 
 
+# Panels, buttons and status boxes, wherever they appear. Grey rather than a
+# colour because none of them are part of the map and none should look like a
+# faction holding it, and because they sit over terrain of every hue - a
+# coloured panel reads as belonging to whatever it happens to be covering.
+# 13:1 against white, so the text stays comfortable at any brightness.
+PANEL_FG: Color = (255, 255, 255)
+PANEL_BG: Color = (48, 48, 48)
+
+# The one thing that is picked out rather than merely shown: the selected
+# button. Inverted rather than tinted, so it reads as chosen at a glance.
+SELECTED_FG: Color = (24, 24, 24)
+SELECTED_BG: Color = (232, 232, 232)
+
+
 def blend(top: Color, bottom: Color, alpha: float) -> Color:
     """`top` laid over `bottom` at `alpha` opacity.
 
