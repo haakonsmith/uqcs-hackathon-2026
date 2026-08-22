@@ -7,7 +7,7 @@ from collections import Counter
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from client.palette import Color, Factions, blend
+from client.palette import ALLIED, Color, Factions, blend
 from client.screen import Screen
 from protocol import terrain
 
@@ -313,8 +313,11 @@ def draw_garrisons(
     pending = placements or {}
 
     for territory in world.territories:
-        # Unclaimed ground has no garrison to report, only a colour.
-        if territory.owner is None:
+        placed = pending.get(territory.id, 0)
+        # Unclaimed ground has no garrison to report, only a colour - unless
+        # this player has promised troops to it, which is the one thing about
+        # empty ground worth saying.
+        if territory.owner is None and not placed:
             continue
 
         anchor_x, anchor_y = garrison_anchor(world, territory)
@@ -325,8 +328,15 @@ def draw_garrisons(
         if not view.covers(y):
             continue
 
-        placed = pending.get(territory.id, 0)
-        label = f"{territory.soldiers}(+{placed})" if placed else str(territory.soldiers)
+        if territory.owner is None:
+            # Nothing garrisons it, so there is no count to add to: the plan is
+            # the whole label, in this player's colour because they are the only
+            # side it belongs to.
+            label = f"(+{placed})"
+            background = ALLIED if factions.you is None else factions.colors[factions.you]
+        else:
+            label = f"{territory.soldiers}(+{placed})" if placed else str(territory.soldiers)
+            background = side_color(factions, territory.id)
         # Centred on the cell, which is two columns wide; a count wider than
         # that spreads either side of it rather than hanging off to the right.
         left = x + (CELL_WIDTH - len(label)) // 2
@@ -338,7 +348,6 @@ def draw_garrisons(
             continue
         taken |= span
 
-        background = side_color(factions, territory.id)
         screen.text(left, y, label, fg=_readable_on(background), bg=background, bold=True)
 
 

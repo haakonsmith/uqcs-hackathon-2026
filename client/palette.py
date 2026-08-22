@@ -15,7 +15,7 @@ and turns them into escape sequences.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from protocol import LobbyPlayer, terrain
 
@@ -80,14 +80,16 @@ class Factions:
     per cell instead of hashing a UUID. Side 0 is the local player whenever
     they hold ground, which is also the order the legend lists.
 
-    A snapshot of ownership as the board arrived: call `assign` again once
-    territories start changing hands.
+    A snapshot of ownership as the board last stood: call `updated` once
+    territories change hands, which keeps every side's colour and only moves
+    the ground between them.
     """
 
     side_of: dict[int, int]  # territory id -> side
     colors: list[Color]  # side -> frontier colour
     names: list[str]  # side -> the player's name
     you: int | None  # the local player's side, if they were dealt anything
+    sides: dict[str, int] = field(default_factory=dict)  # player id -> side
 
     @classmethod
     def assign(cls, world: terrain.WorldMap, me: str, roster: Sequence[LobbyPlayer] = ()) -> Factions:
@@ -116,7 +118,34 @@ class Factions:
             colors=colors,
             names=[names.get(held, f"player {held[:4]}") for held in holders],
             you=sides.get(me),
+            sides=sides,
         )
+
+    def updated(self, world: terrain.WorldMap) -> Factions:
+        """The same sides in the same colours, holding what they hold now.
+
+        Not `assign` again: that hands out colours in the order players appear
+        on the board, so a round that takes ground from one player and gives it
+        to another would renumber the sides and swap two enemies' colours
+        between frames. Only the territory-to-side map is rebuilt.
+        """
+        sides = dict(self.sides)
+        colors, names = list(self.colors), list(self.names)
+        side_of: dict[int, int] = {}
+
+        for territory in world.territories:
+            if territory.owner is None:
+                continue
+            held = str(territory.owner)
+            if held not in sides:
+                # Nobody joins mid-game, so this is only ever a board that
+                # dealt somebody nothing to start with.
+                sides[held] = len(colors)
+                colors.append(HOSTILE[sum(c != ALLIED for c in colors) % len(HOSTILE)])
+                names.append(f"player {held[:4]}")
+            side_of[territory.id] = sides[held]
+
+        return Factions(side_of=side_of, colors=colors, names=names, you=self.you, sides=sides)
 
     @property
     def count(self) -> int:
