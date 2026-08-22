@@ -37,6 +37,7 @@ from protocol.frames import (
     dump_frame,
     parse_frame,
 )
+from protocol.world import TerrainInfo, TerritoryState, World
 
 __all__ = [
     "FRAME_ADAPTER",
@@ -57,6 +58,9 @@ __all__ = [
     "ResFrame",
     "ServerEvent",
     "ServerResponse",
+    "TerrainInfo",
+    "TerritoryState",
+    "World",
     "dump_frame",
     "parse_frame",
     "response_types",

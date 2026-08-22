@@ -1,13 +1,12 @@
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import assert_never
 from uuid import UUID, uuid4
 
 import websockets
-import world
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
-from world import World
 
 from protocol import (
     ClientRequest,
@@ -25,8 +24,8 @@ from protocol import (
     dump_frame,
     parse_frame,
 )
-from protocol.terrain import WorldMap
 from server.player import Player
+from server.world import World, create_world
 
 logger = logging.getLogger("Server")
 
@@ -36,7 +35,7 @@ class Server:
     connections: set[websockets.ServerConnection]
     players: dict[UUID, Player]
     sessions: dict[websockets.ServerConnection, UUID]
-    map: WorldMap | None
+    map: World
     player_count: int
 
     def __init__(self) -> None:
@@ -44,7 +43,8 @@ class Server:
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
-        self.map: World = world.create_world()
+
+        self.map: World = create_world()
         self.player_count = 4
 
     async def handle_request(self, ws: websockets.ServerConnection, request: ClientRequest) -> ServerResponse:
@@ -57,9 +57,6 @@ class Server:
                 self.sessions[ws] = player_id
 
                 await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
-
-                if len(self.players) >= self.player_count and self.map is None:
-                    self.createWorld()
 
                 return Joined(player_id=str(player_id), world=self.map)
 

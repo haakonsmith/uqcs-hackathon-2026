@@ -18,6 +18,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
+from protocol.world import World
 
 # --------------------------------------------------------------------------
 # Responses
@@ -26,10 +27,18 @@ from protocol.core import Request
 
 @dataclass(frozen=True)
 class Joined:
-    """Accepted into a room, with the id the player is known by."""
+    """Accepted into a room, with the id the player is known by.
+
+    The board rides along on the acceptance rather than arriving as a later
+    push: a client has nothing to draw until it has one, so a separate event
+    would only open a window where it is joined but blank.
+
+    A `World` and not a `terrain.WorldMap`, because this has to survive JSON.
+    Call `world.to_map()` for the renderable board.
+    """
 
     player_id: str
-    room: str
+    world: World
     kind: Literal["joined"] = "joined"
 
 
@@ -70,7 +79,6 @@ class Echo(Request[Echoed]):
 @dataclass(frozen=True)
 class PlayerJoined:
     player_id: str
-    room: str
     kind: Literal["player_joined"] = "player_joined"
 
 

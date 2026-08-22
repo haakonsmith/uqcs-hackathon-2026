@@ -14,11 +14,10 @@ from dataclasses import dataclass, field
 import blessed
 from blessed.keyboard import Keystroke
 
-from client import terrain
 from client.input import SCROLL_KEYS, wheel_delta
 from client.render import Highlight, render, status
 from client.viewport import Viewport
-from protocol import ServerEvent
+from protocol import ServerEvent, terrain
 
 logger = logging.getLogger("client")
 

@@ -1,5 +1,5 @@
-import time
 import blessed
+
 
 def get_username(term: blessed.Terminal) -> str:
     """Prompts the user to enter their username in a clean terminal popup."""

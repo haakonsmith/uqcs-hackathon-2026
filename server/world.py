@@ -23,20 +23,17 @@ for clients over websockets.
 
 from __future__ import annotations
 
-import json
 import math
 import random
 from collections import deque
-from collections.abc import Iterator, Sequence
-from dataclasses import asdict, dataclass, field
-from enum import Enum
-from typing import Any
+from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 import numpy as np
 from numpy.typing import NDArray
 
-from protocol.terrain import Terrain, WorldMap, Cell, Territory
+from protocol.terrain import Cell, Terrain, Territory, WorldMap
+from protocol.world import World
 
 # Used when a board is generated without a lobby to take player ids from.
 PLAYER_COUNT = 4
@@ -66,6 +63,7 @@ SEA_LEVEL = max(limit for limit, terrain in TERRAIN_BANDS if terrain.is_water)
 # Moisture above this turns lowland into forest, below it into grass.
 _FOREST_MOISTURE = 0.5
 
+
 def classify(height: float) -> Terrain:
     for limit, terrain in TERRAIN_BANDS:
         if height < limit:
@@ -84,6 +82,7 @@ def classify_cell(height: float, moisture: float) -> Terrain:
     if terrain in (Terrain.GRASS, Terrain.FOREST):
         return Terrain.FOREST if moisture >= _FOREST_MOISTURE else Terrain.GRASS
     return terrain
+
 
 _ORTHOGONAL = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
@@ -212,7 +211,7 @@ def _fbm(
 def _coordinates(width: int, height: int, scale: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     xs = np.arange(width, dtype=np.float64) / scale
     ys = np.arange(height, dtype=np.float64) / scale
-    return np.broadcast_arrays(xs[None, :], ys[:, None])
+    return np.broadcast_arrays(xs[None, :], ys[:, None])  # ty: ignore[invalid-return-type]
 
 
 # Arbitrary offsets that decorrelate fields sharing one permutation table.
@@ -408,9 +407,7 @@ def _free_neighbours(
     owner: dict[tuple[int, int], int],
 ) -> list[tuple[int, int]]:
     x, y = cell
-    return [
-        n for n in ((x + dx, y + dy) for dx, dy in _ORTHOGONAL) if n in members and n not in owner
-    ]
+    return [n for n in ((x + dx, y + dy) for dx, dy in _ORTHOGONAL) if n in members and n not in owner]
 
 
 def _sweep_leftovers(
@@ -430,11 +427,7 @@ def _sweep_leftovers(
         still_free: list[tuple[int, int]] = []
         for cell in unclaimed:
             x, y = cell
-            adjacent = {
-                owner[n]
-                for n in ((x + dx, y + dy) for dx, dy in _ORTHOGONAL)
-                if n in members and n in owner
-            }
+            adjacent = {owner[n] for n in ((x + dx, y + dy) for dx, dy in _ORTHOGONAL) if n in members and n in owner}
             if not adjacent:
                 still_free.append(cell)
                 continue
@@ -651,6 +644,7 @@ def _link_sea_routes(territories: list[Territory], max_distance: float) -> None:
         territories[b].sea_neighbours.add(a)
         groups.union(a, b)
 
+
 def _divide(
     territories: list[Territory],
     players: list[UUID],
@@ -706,6 +700,7 @@ def _place_soldiers(
         for _ in range(budget - len(owned)):
             rng.choice(owned).soldiers += 1
 
+
 def _player_ids(players: Sequence[UUID] | None, player_count: int) -> list[UUID]:
     """Use the lobby's ids when there is one, otherwise mint placeholders."""
     if players is not None:
@@ -760,10 +755,7 @@ def generate(
     )
     moisture = moisture_field(width, height, moisture_scale, seed)
 
-    grid = [
-        [Cell(x, y, float(h), classify_cell(float(h), float(moisture[y][x]))) for x, h in enumerate(row)]
-        for y, row in enumerate(heights)
-    ]
+    grid = [[Cell(x, y, float(h), classify_cell(float(h), float(moisture[y][x]))) for x, h in enumerate(row)] for y, row in enumerate(heights)]
 
     territories = _build_territories(
         grid,
@@ -777,126 +769,6 @@ def generate(
     _divide(territories, ids, soldiers_per_territory, rng)
 
     return WorldMap(width, height, grid, territories)
-
-# --------------------------------------------------------------------------
-# Websocket-serialisable game state
-# --------------------------------------------------------------------------
-
-
-@dataclass
-class TerrainInfo:
-    """Palette and rules for one terrain type, so clients can render it."""
-
-    name: str
-    label: str
-    symbol: str
-    passable: bool
-    move_cost: int
-    colour: tuple[int, int, int]
-
-
-@dataclass
-class TerritoryState:
-    """One claimable region on the board."""
-
-    id: int
-    cells: list[tuple[int, int]] = field(default_factory=list)
-    land_neighbours: list[int] = field(default_factory=list)
-    sea_neighbours: list[int] = field(default_factory=list)
-    soldiers: int = 0
-    owner: UUID | None = None  # Player.id, serialised as a string
-
-    @property
-    def size(self) -> int:
-        return len(self.cells)
-
-
-def _jsonable(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    """asdict factory that turns player UUIDs into strings for the wire."""
-
-    def convert(value: Any) -> Any:
-        if isinstance(value, UUID):
-            return str(value)
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        return value
-
-    return {key: convert(value) for key, value in pairs}
-
-
-@dataclass
-class World:
-    """Full map snapshot the server owns and can push over websockets."""
-
-    width: int
-    height: int
-    seed: int | None
-    # Row-major heights in [0.0, 1.0] — heights[y][x]
-    heights: list[list[float]]
-    # Parallel to heights: Terrain member name per cell
-    terrain: list[list[str]]
-    # Parallel to heights: territory id per cell, or None for ocean / unclaimed
-    territory_ids: list[list[int | None]]
-    territories: list[TerritoryState] = field(default_factory=list)
-    terrain_types: list[TerrainInfo] = field(default_factory=list)
-
-    @property
-    def owners(self) -> list[UUID]:
-        """Every player holding ground, first appearance first."""
-        return list(dict.fromkeys(t.owner for t in self.territories if t.owner is not None))
-
-    def cell_height(self, x: int, y: int) -> float:
-        return self.heights[y][x]
-
-    def territory_at(self, x: int, y: int) -> TerritoryState | None:
-        tid = self.territory_ids[y][x]
-        if tid is None:
-            return None
-        return self.territories[tid]
-
-    def owned_by(self, player: UUID) -> list[TerritoryState]:
-        return [t for t in self.territories if t.owner == player]
-
-    def to_dict(self) -> dict:
-        """JSON-ready payload for websocket.send(json.dumps(...))."""
-        return asdict(self, dict_factory=_jsonable)
-
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict())
-
-    @classmethod
-    def from_map(cls, world_map: WorldMap, seed: int | None = None) -> World:
-        """Build serialisable state from a generated WorldMap."""
-        return cls(
-            width=world_map.width,
-            height=world_map.height,
-            seed=seed,
-            heights=[[cell.height for cell in row] for row in world_map.grid],
-            terrain=[[cell.terrain.name for cell in row] for row in world_map.grid],
-            territory_ids=[[cell.territory for cell in row] for row in world_map.grid],
-            territories=[
-                TerritoryState(
-                    id=t.id,
-                    cells=list(t.cells),
-                    land_neighbours=sorted(t.land_neighbours),
-                    sea_neighbours=sorted(t.sea_neighbours),
-                    soldiers=t.soldiers,
-                    owner=t.owner,
-                )
-                for t in world_map.territories
-            ],
-            terrain_types=[
-                TerrainInfo(
-                    name=terrain.name,
-                    label=terrain.label,
-                    symbol=terrain.symbol,
-                    passable=terrain.passable,
-                    move_cost=terrain.move_cost,
-                    colour=terrain.color,
-                )
-                for terrain in Terrain
-            ],
-        )
 
 
 def create_world(

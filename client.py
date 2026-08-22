@@ -26,7 +26,6 @@ import threading
 import blessed
 import websockets
 
-from client import terrain
 from client.input import (
     AppEvent,
     KeyPress,
@@ -40,12 +39,6 @@ from client.input import (
 from client.menu import JoinGame, Quit, notice, run_menu
 from client.state import App
 from protocol import Connection, Join, JoinRejected
-
-SEED = 42
-
-# Bigger than any terminal, so there is something to scroll around.
-BOARD_WIDTH = 160
-BOARD_HEIGHT = 90
 
 
 async def play(app: App, events: asyncio.Queue[AppEvent]) -> None:
@@ -91,17 +84,10 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
                 await asyncio.sleep(2)
                 return
 
-            # The server owns the board; until it sends one, generate locally
-            # so there is something to look at.
-            world = terrain.generate(
-                width=BOARD_WIDTH,
-                height=BOARD_HEIGHT,
-                scale=10,
-                octaves=6,
-                seed=SEED,
-                water_fraction=0.68,
-            )
-            await play(App(term=term, world=world), events)
+            # The server owns the board and hands it over on the way in, so
+            # the client never generates one - two ends generating separately
+            # would disagree the moment a parameter drifted.
+            await play(App(term=term, world=joined.world.to_map()), events)
         except ConnectionError as error:
             notice(term, f"connection lost: {error}")
             await asyncio.sleep(2)

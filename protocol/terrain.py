@@ -4,7 +4,6 @@ from enum import Enum
 from uuid import UUID
 
 
-@dataclass
 class Terrain(Enum):
     """A terrain type plus the gameplay rules and palette that ride on it."""
 
@@ -44,6 +43,7 @@ class Terrain(Enum):
     def is_land(self) -> bool:
         return not self.is_water
 
+
 @dataclass(slots=True)
 class Cell:
     x: int
@@ -51,7 +51,6 @@ class Cell:
     height: float  # normalised 0.0 - 1.0
     terrain: Terrain
     territory: int | None = None  # index into WorldMap.territories
-
 
     @property
     def symbol(self) -> str:
@@ -83,7 +82,6 @@ class Territory:
             sum(x for x, _ in self.cells) / self.size,
             sum(y for _, y in self.cells) / self.size,
         )
-
 
 
 @dataclass

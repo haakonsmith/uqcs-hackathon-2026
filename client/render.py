@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import blessed
 
-from client import terrain
+from protocol import terrain
 
 if TYPE_CHECKING:
     from client.viewport import Viewport

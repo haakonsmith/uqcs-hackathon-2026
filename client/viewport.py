@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from client import terrain
+from protocol import terrain
 
 # Each map cell is drawn two columns wide, because terminal cells are roughly
 # twice as tall as they are wide and a 1:1 mapping shears the map vertically.
