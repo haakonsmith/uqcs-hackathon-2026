@@ -1,55 +1,55 @@
-
 import asyncio
-import time
 import random
+import time
 
-from websockets.asyncio.server import serve
-gameState = {};
-player = {};
-world = {};
-territory = {};
+from websockets.asyncio.server import ServerConnection, serve
 
-def createPlayer(websocket):
-    playerId = str(websocket.id); #uuid??
+gameState = {}
+player = {}
+world = {}
+territory = {}
+
+
+def createPlayer(websocket: ServerConnection):
+    playerId = str(websocket.id)  # uuid??
 
     return {
-        "userID": playerId, #idk what player values to add except userID as primary
+        "userID": playerId,  # idk what player values to add except userID as primary
         "connectionTime": time.time(),
-        "lastSeen": time.time(), #for client heartbeat
-        "name": None, #no name yet (idk if we will ask names)
+        "lastSeen": time.time(),  # for client heartbeat
+        "name": None,  # no name yet (idk if we will ask names)
         "status": "Unknown",
-
         "territory": None,
         "points": 0,
-        "currentAction": {
-            "mouseHover": False,
-            "mousePos": (0,0),
-            "mouseTile": (0,0)
-        }
+        "currentAction": {"mouseHover": False, "mousePos": (0, 0), "mouseTile": (0, 0)},
     }
 
-def createTerritory(name, id): #no arguments for now 
+
+def createTerritory(name, id):  # no arguments for now
     return {
         "name": name,
         "id": id,
-        "colour": random.randint(1, 15), #maybe int represents colour, like 1=blue
+        "colour": random.randint(1, 15),  # maybe int represents colour, like 1=blue
     }
 
 
 async def game(websocket):
-    player[websocket] = createPlayer(websocket);
+    player[websocket] = createPlayer(websocket)
 
-    #name = await websocket.recv();
-    #print(f"<<< {name}")
 
-    #greeting = f"Hello {name}!"
+# name = await websocket.recv();
+# print(f"<<< {name}")
 
-    #await websocket.send(greeting)
-    #print(f">>> {greeting}")
+# greeting = f"Hello {name}!"
+
+# await websocket.send(greeting)
+# print(f">>> {greeting}")
+
 
 async def main():
     server = await serve(game, "localhost", 8765)
     await server.serve_forever()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
