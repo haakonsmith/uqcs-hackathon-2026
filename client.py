@@ -1,6 +1,8 @@
 """Game client: start menu, then the board.
 
-    python client.py
+    python client.py                              # menu, defaulting to localhost:8888
+    python client.py --address 10.0.0.4           # someone else's machine
+    python client.py --address ws://host:9000     # spelled out in full
 
 The menu is arrow keys or the mouse; JOIN GAME asks for a username and
 connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
@@ -23,6 +25,7 @@ For live tweaking of the generation parameters, run `viewer.py`.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import threading
@@ -41,7 +44,7 @@ from client.input import (
     watch_resize,
 )
 from client.lobby import run_lobby
-from client.menu import JoinGame, Quit, alert, notice, run_menu
+from client.menu import DEFAULT_ADDRESS, JoinGame, Quit, alert, notice, run_menu, set_address, set_username
 from client.state import App
 from protocol import Connection, Join, JoinRejected
 
@@ -105,10 +108,57 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
                     await task
 
 
-async def main() -> None:
+DEFAULT_PORT = 8888
+
+
+def websocket_url(value: str) -> str:
+    """Accept `host`, `host:port` or a full `ws://...` and return a full URL.
+
+    Typing the scheme and port every time is friction for the common case of
+    "the machine over there", so both are filled in. An explicit scheme is
+    checked rather than passed through: `http://` here fails inside
+    `websockets.connect` with a message about the wrong library.
+    """
+    if "://" in value:
+        scheme, _, rest = value.partition("://")
+        if scheme not in ("ws", "wss"):
+            raise argparse.ArgumentTypeError(f"{scheme!r} is not a websocket scheme; use ws:// or wss://")
+        if not rest:
+            raise argparse.ArgumentTypeError(f"{value!r} has no host")
+        return value
+
+    # An IPv6 literal is already bracketed, and its colons are not a port.
+    host, sep, port = value.rpartition(":")
+    if sep and not value.endswith("]") and port.isdigit():
+        return f"ws://{host}:{port}"
+    return f"ws://{value}:{DEFAULT_PORT}"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="client.py",
+        description="Play a game of Termination.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--address",
+        type=websocket_url,
+        default=DEFAULT_ADDRESS,
+        metavar="HOST[:PORT]",
+        help="server to join; editable afterwards from the SETTINGS screen",
+    )
+    parser.add_argument("--name", metavar="NAME", help="pre-fill the username prompt")
+    return parser.parse_args(argv)
+
+
+async def main(args: argparse.Namespace) -> None:
     term = blessed.Terminal()
     events: asyncio.Queue[AppEvent] = asyncio.Queue()
     stop = threading.Event()
+
+    set_address(args.address)
+    if args.name:
+        set_username(args.name)
 
     with term.fullscreen(), term.cbreak(), term.hidden_cursor(), mouse_tracking(term):
         # One pump for both screens, so keys never go missing between them.
@@ -126,4 +176,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(parse_args()))

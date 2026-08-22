@@ -117,6 +117,20 @@ class MenuState:
 state = MenuState()
 
 
+def set_address(address: str) -> None:
+    """Point the menu at a server before it is first drawn.
+
+    So `--address` and the SETTINGS screen write to the same place, and the
+    address typed in one is the one the other shows.
+    """
+    state.address = address
+
+
+def set_username(username: str) -> None:
+    """Pre-fill the name. The prompt still appears, already holding this."""
+    state.username = username
+
+
 def button_geometry(index: int, width: int, height: int) -> tuple[int, int, int]:
     """Top-left corner and drawn width of a button, in screen cells."""
     item = MENU_ITEMS[index]
