@@ -26,7 +26,7 @@ from __future__ import annotations
 import heapq
 import math
 import random
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
@@ -666,12 +666,82 @@ class _DisjointSet:
         return True
 
 
-def _link_sea_routes(territories: list[Territory], max_distance: float) -> None:
-    """Bridge landmasses with sea lanes.
+def _coast(grid: list[list[Cell]], territory: Territory) -> list[tuple[int, int]]:
+    """The cells of a territory that stand on open water.
 
-    Adds every cross-landmass pair within `max_distance`, then keeps adding
-    the next shortest link until the whole board is one connected graph --
-    otherwise a player can be stranded on an unreachable island.
+    A territory with none of these is inland and has no business being the end
+    of a shipping lane, however close its centre happens to be to the sea.
+    """
+    height, width = len(grid), len(grid[0])
+    shore: list[tuple[int, int]] = []
+    for x, y in territory.cells:
+        for dx, dy in _ORTHOGONAL:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and grid[ny][nx].terrain.is_water:
+                shore.append((x, y))
+                break
+    return shore
+
+
+def _crosses_water(grid: list[list[Cell]], start: tuple[int, int], end: tuple[int, int]) -> bool:
+    """Whether the straight line between two ports stays at sea.
+
+    A lane that clips a headland is one drawn through solid ground, and a
+    player looking at the map would rightly not believe it. Only the cells
+    strictly between the two ports are checked; the ports themselves are land
+    by definition.
+    """
+    x0, y0 = start
+    x1, y1 = end
+    steps = max(abs(x1 - x0), abs(y1 - y0))
+    if steps < 2:
+        return False
+
+    for step in range(1, steps):
+        x = round(x0 + (x1 - x0) * step / steps)
+        y = round(y0 + (y1 - y0) * step / steps)
+        if not grid[y][x].terrain.is_water:
+            return False
+    return True
+
+
+def _sea_gap(
+    grid: list[list[Cell]],
+    a: Territory,
+    b: Territory,
+    coasts: dict[int, list[tuple[int, int]]],
+) -> tuple[float, tuple[int, int], tuple[int, int]] | None:
+    """The shortest sea crossing between two ports, if there is one at all."""
+    best: tuple[float, tuple[int, int], tuple[int, int]] | None = None
+    for start in coasts[a.id]:
+        for end in coasts[b.id]:
+            distance = math.hypot(start[0] - end[0], start[1] - end[1])
+            if best is not None and distance >= best[0]:
+                continue
+            if _crosses_water(grid, start, end):
+                best = (distance, start, end)
+    return best
+
+
+def _link_sea_routes(
+    grid: list[list[Cell]],
+    territories: list[Territory],
+    max_distance: float,
+    per_port: int,
+) -> None:
+    """Open shipping lanes between ports that face each other across water.
+
+    Two jobs. The first is that no player is stranded: separate landmasses are
+    joined however far apart they are, or somebody spends the game unable to
+    reach anybody. The second is that the board is worth playing on. A single
+    landmass used to get no lanes at all, because the old rule only ever
+    bridged *between* landmasses - so a bay you could see across took a march
+    the long way round, and navies did not exist.
+
+    Lanes run coast to coast rather than centre to centre, are only drawn
+    where the line between them stays at sea, and each port takes at most
+    `per_port` of them, so the map reads as a handful of crossings rather than
+    a cat's cradle over every stretch of water.
     """
     if len(territories) < 2:
         return
@@ -681,23 +751,35 @@ def _link_sea_routes(territories: list[Territory], max_distance: float) -> None:
         for n in t.land_neighbours:
             groups.union(t.id, n)
 
-    centroids = {t.id: t.centroid for t in territories}
-    candidates = []
-    for i, a in enumerate(territories):
-        for b in territories[i + 1 :]:
-            if groups.find(a.id) == groups.find(b.id):
-                continue  # same landmass: already walkable
-            ax, ay = centroids[a.id]
-            bx, by = centroids[b.id]
-            candidates.append((math.hypot(ax - bx, ay - by), a.id, b.id))
+    coasts = {t.id: _coast(grid, t) for t in territories}
+    candidates: list[tuple[float, int, int]] = []
+    for index, a in enumerate(territories):
+        if not coasts[a.id]:
+            continue
+        for b in territories[index + 1 :]:
+            if not coasts[b.id] or b.id in a.land_neighbours:
+                continue
+            gap = _sea_gap(grid, a, b, coasts)
+            if gap is not None:
+                candidates.append((gap[0], a.id, b.id))
     candidates.sort()
 
+    routes = Counter[int]()
     for distance, a, b in candidates:
+        # A lane that joins two landmasses is taken whatever it costs and
+        # whatever else those ports are already doing: being reachable comes
+        # before being tidy.
         joins = groups.find(a) != groups.find(b)
-        if not joins and distance > max_distance:
-            continue
+        if not joins:
+            if distance > max_distance:
+                continue
+            if routes[a] >= per_port or routes[b] >= per_port:
+                continue
+
         territories[a].sea_neighbours.add(b)
         territories[b].sea_neighbours.add(a)
+        routes[a] += 1
+        routes[b] += 1
         groups.union(a, b)
 
 
@@ -780,6 +862,9 @@ def generate(
     moisture_scale: float = 30.0,
     min_landmass_size: int = 40,
     sea_route_distance: float = 14.0,
+    # Lanes per port. Two lets a coastal territory be a junction without
+    # every stretch of water turning into a web nobody can read.
+    sea_routes_per_port: int = 2,
     relaxations: int = 2,
 ) -> WorldMap:
     """Build a playable board.
@@ -821,7 +906,7 @@ def generate(
         relaxations,
     )
     _link_land_neighbours(grid, territories)
-    _link_sea_routes(territories, sea_route_distance)
+    _link_sea_routes(grid, territories, sea_route_distance, sea_routes_per_port)
     _divide(territories, ids, soldiers_per_territory, rng)
 
     return WorldMap(width, height, grid, territories)

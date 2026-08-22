@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from client.palette import ALLIED, Color, Factions, blend
 from client.screen import Screen
 from protocol import terrain
+from protocol.terrain import Terrain
 
 if TYPE_CHECKING:
     from client.viewport import Viewport
@@ -37,6 +38,10 @@ BORDER_ALPHA_BOLD = 0.5
 # The least a frontier cell must differ in brightness from the ground under it.
 # Hue alone is not a border on a greyscale terminal, to a colour-blind player,
 # or once a 256-colour terminal has rounded both to the same entry.
+# How much of a lane cell is the owner's colour rather than open sea. Enough
+# to follow across a bay, not so much that the water stops looking like water.
+ROUTE_ALPHA = 0.45
+
 BORDER_CONTRAST = 1.25
 BORDER_CONTRAST_BOLD = 1.7
 
@@ -279,6 +284,65 @@ def garrison_anchor(world: terrain.WorldMap, territory: terrain.Territory) -> tu
     if 0 <= x < world.width and 0 <= y < world.height and world.grid[y][x].territory == territory.id:
         return x, y
     return min(territory.cells, key=lambda cell: (cell[0] - centre_x) ** 2 + (cell[1] - centre_y) ** 2)
+
+
+def draw_sea_routes(screen: Screen, world: terrain.WorldMap, view: Viewport, factions: Factions) -> None:
+    """Dot the shipping lanes across the water between linked ports.
+
+    Without these a lane is a rule nobody can see. Two territories are
+    neighbours across open sea, so troops can march between them, and the only
+    way to find that out was to cycle the selection and notice somewhere
+    distant light up.
+
+    Drawn as a dotted line rather than a solid one so it reads as a route over
+    the water rather than a strip of land, and only on cells that really are
+    water - a lane whose ends have drifted onto a coastline should not paint
+    over the coastline.
+    """
+    drawn: set[tuple[int, int]] = set()
+    for territory in world.territories:
+        for other_id in territory.sea_neighbours:
+            # Each pair once, from the lower id, so a lane is not drawn twice.
+            if other_id < territory.id:
+                continue
+            start = garrison_anchor(world, territory)
+            end = garrison_anchor(world, world.territories[other_id])
+            _dot_route(screen, world, view, factions, territory, start, end, drawn)
+
+
+def _dot_route(
+    screen: Screen,
+    world: terrain.WorldMap,
+    view: Viewport,
+    factions: Factions,
+    territory: terrain.Territory,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    drawn: set[tuple[int, int]],
+) -> None:
+    """Every other water cell along the line between two ports."""
+    steps = max(abs(end[0] - start[0]), abs(end[1] - start[1]))
+    if steps < 2:
+        return
+
+    colour = blend(side_color(factions, territory.id), Terrain.DEEP_WATER.color, ROUTE_ALPHA)
+    for step in range(1, steps):
+        # Every other cell: a dashed lane, and half the cells to paint.
+        if step % 2:
+            continue
+        map_x = round(start[0] + (end[0] - start[0]) * step / steps)
+        map_y = round(start[1] + (end[1] - start[1]) * step / steps)
+        if not world.cell(map_x, map_y).terrain.is_water:
+            continue
+        if not view.shows(map_x, map_y):
+            continue
+
+        x, y = view.to_screen(map_x, map_y)
+        if not view.covers(y) or (x, y) in drawn:
+            continue
+        drawn.add((x, y))
+        for column in range(CELL_WIDTH):
+            screen.set(x + column, y, (" ", None, colour, False))
 
 
 def draw_garrisons(

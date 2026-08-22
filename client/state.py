@@ -20,7 +20,7 @@ from client import screen as screen_module
 from client.editor import Draft, NoEditor, edit
 from client.input import SCROLL_KEYS, KeyPump, wheel_delta
 from client.palette import Factions
-from client.render import Highlight, draw_board, draw_garrisons, draw_legend
+from client.render import Highlight, draw_board, draw_garrisons, draw_legend, draw_sea_routes
 from client.screen import Screen
 from client.viewport import Viewport
 from protocol import (
@@ -645,6 +645,8 @@ class App:
         frame = Screen(term.width, term.height)
 
         draw_board(frame, self.world, view, self.bold_borders, self.highlights, self.factions)
+        # Over the water, under everything else: a lane is part of the map.
+        draw_sea_routes(frame, self.world, view, self.factions)
         # Garrisons before the legend: the legend is a solid box and should
         # cover a count that lands under it, rather than have digits printed
         # across its rows.
