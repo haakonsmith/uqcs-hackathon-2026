@@ -137,7 +137,17 @@ async def join(
             # Colours are picked here rather than sent with the board: they are
             # presentation, and which side counts as "ours" is only known here.
             factions = Factions.assign(board, joined.player_id, lobby.players)
-            await play(App(term=term, world=board, factions=factions), events)
+            await play(
+                App(
+                    term=term,
+                    world=board,
+                    factions=factions,
+                    conn=conn,
+                    pump=pump,
+                    me=joined.player_id,
+                ),
+                events,
+            )
         except ConnectionError as error:
             await alert(term, events, "CONNECTION LOST", "", str(error))
         finally:

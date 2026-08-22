@@ -15,9 +15,11 @@ from uuid import UUID
 import blessed
 from blessed.keyboard import Keystroke
 
-from client.input import SCROLL_KEYS, wheel_delta
+from client import hud
+from client.editor import Draft, NoEditor, edit
+from client.input import SCROLL_KEYS, KeyPump, wheel_delta
 from client.palette import Factions
-from client.render import Highlight, legend_panel, render, status
+from client.render import Highlight, legend_panel, render
 from client.viewport import Viewport
 from protocol import (
     Acknowledged,
@@ -422,14 +424,22 @@ class App:
         # After the board, because it is laid over it.
         if self.legend:
             print(legend_panel(term, view, self.factions), end="")
-        print(
-            term.move_xy(0, view.drawn_rows) + term.ljust(status(self.world, view, self.hover)[: term.width]),
-            end="",
-        )
+
+        # Two bars: what the round is doing, and what the mouse is pointing at
+        # plus the keys that work right now.
+        bars = [
+            hud.phase_line(self.round, self.me, self.message),
+            f" {hud.where(self.world, view)}  {self.hover}" + hud.key_line(self.round, self.move_from),
+        ]
+        for offset, text in enumerate(bars):
+            row = view.drawn_rows + offset
+            if row < term.height:
+                print(term.move_xy(0, row) + term.ljust(text[: term.width]), end="")
+
         # Zooming out shrinks the map below the window, so wipe whatever the
-        # previous frame left under the status bar. Skip it when the bar is
-        # already on the last row: moving past the bottom clamps back onto the
-        # bar and the erase would take the bar with it.
+        # previous frame left under the status bars. Skip it when they are
+        # already on the last rows: moving past the bottom clamps back onto
+        # them and the erase would take them with it.
         if view.drawn_rows + len(bars) < term.height:
             print(term.move_xy(0, view.drawn_rows + len(bars)) + term.clear_eos, end="")
 

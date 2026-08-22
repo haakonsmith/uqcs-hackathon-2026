@@ -167,8 +167,3 @@ def legend_panel(term: blessed.Terminal, view: Viewport, factions: Factions) -> 
         # before it clears the colour along with the bold and the swatch.
         output.append(term.move_xy(left, row) + background + LEGEND_PAD + term.color_rgb(*color) + LEGEND_SWATCH + foreground + label + term.normal)
     return "".join(output)
-
-
-def status(world: terrain.WorldMap, view: Viewport, hover: str) -> str:
-    position = f"[{view.x},{view.y}] {view.span_x}x{view.span_y} of {world.width}x{world.height} @{view.zoom}x"
-    return f" {position}  {hover}   arrows/wheel scroll  +/- zoom  [o]verlay  [l]egend  [q]uit "
