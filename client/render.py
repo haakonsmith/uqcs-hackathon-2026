@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import colorsys
+from typing import TYPE_CHECKING
 
 import blessed
 
 from client import terrain
-from client.viewport import CELL_WIDTH, Viewport
+
+if TYPE_CHECKING:
+    from client.viewport import Viewport
+
+# Each map cell is drawn two columns wide, because terminal cells are roughly
+# twice as tall as they are wide and a 1:1 mapping shears the map vertically.
+CELL_WIDTH = 2
 
 Color = tuple[int, int, int]
 
