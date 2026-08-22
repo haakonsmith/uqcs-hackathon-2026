@@ -1,6 +1,8 @@
 import time
 from dataclasses import dataclass
 
+Position = tuple[int, int]
+
 
 @dataclass
 class currentAction:
