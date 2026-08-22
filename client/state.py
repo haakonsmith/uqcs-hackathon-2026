@@ -694,6 +694,9 @@ class App:
                     territory = self.world.territories[update.id]
                     territory.owner = UUID(update.owner) if update.owner else None
                     territory.soldiers = update.soldiers
+                # Ground that changed hands has to change colour with it, or
+                # the board goes on drawing a territory as its old holder's.
+                self.factions = self.factions.updated(self.world)
                 # The only delta the server sends is the one a phase resolving
                 # produces, and it already counts in everything that was
                 # promised. Keeping the `(+n)` would show those troops twice.
