@@ -8,22 +8,10 @@ from server.server import Server
 
 gameState = {}
 players = {}
-world = {}
+world: World | None = None
 territory = {}
 playersTarget = 4
 lobbyCount = 0
-
-
-def createWorld():
-    return {"numTerritories": 0}
-
-
-def createTerritory(name: str, id: str):  # no arguments for now
-    return {
-        "name": name,
-        "id": id,
-        "colour": random.randint(1, 15),  # maybe int represents colour, like 1=blue (random for now)
-    }
 
 
 async def startMenu(websocket: websockets.ServerConnection):
@@ -46,14 +34,19 @@ async def lobby(websocket: websockets.ServerConnection):
     print(len(players))
     for p in players.values():
         if p.getStatus() == "LOBBY":
-            if lobbyCount == playersTarget:
-                await game()
             await p.getWebSocket().send(f"LOBBY: {lobbyCount}/{playersTarget}")
+    if lobbyCount == playersTarget:
+        await game()
 
 
 async def game():
-    for player in players.values():
-        player.getWebSocket().send("Game starting")
+    global world
+    world = create_world()
+    payload = world.to_json()
+    for p in players.values():
+        p.setStatus("GAME")
+        await p.getWebSocket().send("Game starting")
+        await p.getWebSocket().send(payload)
 
 
 async def clients(websocket: websockets.ServerConnection):
