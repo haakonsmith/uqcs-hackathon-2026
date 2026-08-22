@@ -28,35 +28,36 @@ DEFAULT_USERNAME = "Player"
 
 # --- Solid Block Title Art ("TERMINATION") ---
 TITLE_ART = [
-    " ██████ ███████ ██████  ██      ██ ██ ███    ██  █████  ████████ ██   ██████  ██    ██",
-    "   ██   ██      ██   ██ ████  ████ ██ ████   ██ ██   ██    ██    ██  ██    ██ ███   ██",
-    "   ██   █████   ██████  ██ ████ ██ ██ ██ ██  ██ ███████    ██    ██  ██    ██ ██ ██ ██",
-    "   ██   ██      ██   ██ ██  ██  ██ ██ ██  ██ ██ ██   ██    ██    ██  ██    ██ ██  ████",
-    "   ██   ███████ ██   ██ ██      ██ ██ ██   ████ ██   ██    ██    ██   ██████  ██   ███",
+    "████████ ███████ ██████  ██      ██ ██ ███    ██  █████  ████████ ██  ██████  ███    ██",
+    "@@@██@@@ ██@@@@@ ██@@@██ ████  ████ ██ ████   ██ ██@@@██ @@@██@@@ ██ ██@@@@██ ████   ██",
+    "   ██    ███████ ██████@ ██@@██@@██ ██ ██@██  ██ ███████    ██    ██ ██    ██ ██@██  ██",
+    "   ██    ██@@@@@ ██@@@██ ██  ██  ██ ██ ██ @██ ██ ██@@@██    ██    ██ ██    ██ ██ @██ ██",
+    "   ██    ███████ ██   ██ ██  @@  ██ ██ ██  @████ ██   ██    ██    ██  ██████  ██  @████",
+    "   @@    @@@@@@@ @@   @@ @@      @@ @@ @@   @@@@ @@   @@    @@    @@  @@@@@@  @@   @@@@",
 ]
 
 # Decoration only - the board the game is played on comes from the server.
 WORLD_MAP = [
     "           ################      ##`             #                ",
-    "         ######## #########      ##               #               ",
-    "          ######    #######                   ######    # #       ",
-    "        ##########  ########             ##################       ",
-    " ##################  ####         ##############################  ",
-    " ##################   #    #    ###############################   ",
-    "  ##################             ########################         ",
-    "        ############        #############################  #      ",
-    "        #############         ##########################          ",
-    "         ########            ############################         ",
-    "          ######            #########################             ",
-    " #          ###  ##        ##############  ### ####               ",
-    "                #####       ###########                           ",
-    "                ########         ######          # #   #          ",
-    "                 #######         #######              ###         ",
-    "                 ######          #### ##           ########       ",
-    "                 ####             ##                #######       ",
-    "                  #                                      #        ",
-    "                 ##                                               ",
-    "                                                                  ",
+    "         ########@#########      ##              @#               ",
+    "          ######@ @@######@      @@           ######    # #       ",
+    "        ##########  ######               ##################       ",
+    " ###############@@  ####@@        ##############################  ",
+    " ################   @@#@   #    ###############################@  ",
+    " @@@################  @    @    @########################@@@@#@   ",
+    "    @@@@############        ############################@   #@    ",
+    "        #############       @@########@@@###############    @     ",
+    "        @##########@@        #########   ###############          ",
+    "         @######@@@#       ###########   @###########@@@          ",
+    " #         @###@ ##@       @############   @#@#####@@             ",
+    " @          @@@ ######      @##########@    @ @@@@###             ",
+    "                #########    @@@@######           @#@  #  #       ",
+    "                @########        #####@            @ #### ##      ",
+    "                 @######@        ####@             ##########     ",
+    "                  ####@          @##@              @#########   # ",
+    "                  ###@            @@                @##@@###@   # ",
+    "                  ##@                                @@  @@@#   @ ",
+    "                  @@                                        @     ",
 ]
 
 
@@ -176,8 +177,19 @@ def _render_backdrop(term: blessed.Terminal, width: int, height: int) -> str:
         # tall as they are wide and a 1:1 map comes out sheared.
         for x in range(0, width - 1, 2):
             column = (x - start_x) // 2
-            land = x >= start_x and (x - start_x) % 2 == 0 and column < len(row) and row[column] != " "
-            cells.append(term.green_on_blue("██") if land else term.blue_on_blue("██"))
+            in_bounds = x >= start_x and (x - start_x) % 2 == 0 and column < len(row)
+            
+            land = in_bounds and row[column] == "#"
+            at_symbol = in_bounds and row[column] == "@"
+
+            if land:
+                cells.append(term.green_on_blue("██"))
+            elif at_symbol:
+                cells.append(term.darkgreen_on_blue("██"))
+                #cells.append(term.red_on_blue("██"))
+                #print("test")
+            else:
+                cells.append(term.blue_on_blue("██"))
         output.append(term.move_xy(0, y) + "".join(cells))
 
     for index, line in enumerate(TITLE_ART):
@@ -188,10 +200,12 @@ def _render_backdrop(term: blessed.Terminal, width: int, height: int) -> str:
         for offset, char in enumerate(line):
             x = left + offset
             if 0 <= x < width:
-                # The gaps inside the letters are painted solid blue rather
-                # than left transparent, so the map never shows through them.
-                output.append(term.move_xy(x, y) + (term.red_on_blue(char) if char != " " else term.blue_on_blue(" ")))
-
+                if char == "█":
+                    output.append(term.move_xy(x, y) + term.red_on_blue("█"))
+                elif char == "@":
+                    output.append(term.move_xy(x, y) + term.darkred_on_blue("█"))
+                else:
+                    output.append(term.move_xy(x, y) + term.blue_on_blue(" "))
     return "".join(output)
 
 
