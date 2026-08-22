@@ -13,7 +13,7 @@ the response type of a call follows from the request that made it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field, TypeAdapter
 
@@ -127,7 +127,16 @@ class SetReady(Request[ReadySet]):
 
 @dataclass(frozen=True)
 class SubmitSolution(Request[Judged | Refused]):
-    """Try a solution. Allowed as many times as the phase has seconds left."""
+    """Try a solution. Allowed as many times as the phase has seconds left.
+
+    The one request that waits on something slow: the server runs every hidden
+    case in a sandbox before it can answer, and each of those has its own wall
+    clock. A full room submitting at once queues behind the judge's slots, so
+    the honest ceiling is several times one case's limit rather than the
+    default a dictionary write is measured against.
+    """
+
+    timeout_seconds: ClassVar[float] = 45.0
 
     code: str
     action: Literal["submit_solution"] = "submit_solution"
@@ -234,9 +243,14 @@ class BoardChanged:
 
 @dataclass(frozen=True)
 class GameOver:
-    """One player holds the whole board. The round loop has stopped."""
+    """The round loop has stopped, because there is nothing left to play for.
 
-    winner: str
+    `winner` is None when every territory ended up neutral: nobody can place
+    without ground of their own or ground beside it, so a board with no owners
+    is over rather than merely quiet.
+    """
+
+    winner: str | None
     name: str
     kind: Literal["game_over"] = "game_over"
 

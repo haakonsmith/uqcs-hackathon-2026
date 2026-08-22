@@ -91,6 +91,18 @@ class Progress:
         )
 
 
+@dataclass(frozen=True)
+class Outcome:
+    """The game has ended. `winner` is None when nobody was left to win it.
+
+    A win and a mutual wipe-out are the same event as far as the room is
+    concerned - the round loop has to stop either way - so they are one type
+    rather than a `UUID | None` the caller has to know how to read.
+    """
+
+    winner: UUID | None
+
+
 @dataclass
 class Round:
     """The game in progress: a board, a phase, and everyone's standing."""
@@ -102,6 +114,10 @@ class Round:
 
     number: int = 0
     phase: Phase = "submitting"
+    # How many players the game opened with. A solo game has no winner to
+    # declare, and counting `progress` instead would make one the moment
+    # everybody but the last player disconnected.
+    started_with: int = 0
     problem: Problem | None = None
     progress: dict[UUID, Progress] = field(default_factory=dict)
 
@@ -110,10 +126,15 @@ class Round:
     # at once when it ends. Empty outside the commanding phase.
     plan: combat.Plan = field(default_factory=combat.Plan)
     _grace_started: bool = False
+    # Players with a solution in the judge right now. Judging is awaited inside
+    # the request, so without this a player holding the submit key queues a
+    # sandbox run per keystroke and starves everyone else out of the slots.
+    _judging: set[UUID] = field(default_factory=set)
 
     def start(self, players: dict[UUID, str]) -> None:
         """Open the first round for the given players, by id and name."""
         self.progress = {pid: Progress(player_id=pid, name=name) for pid, name in players.items()}
+        self.started_with = len(players)
         self.number = 0
         self._open_round()
 
@@ -153,8 +174,16 @@ class Round:
             raise combat.IllegalMove("solutions are only taken during the submitting phase")
         if self.problem is None:
             raise combat.IllegalMove("no problem has been posed")
+        if player_id in self._judging:
+            raise combat.IllegalMove("your last solution is still being judged")
 
-        verdict = await self.judge.evaluate(self.problem, code)
+        problem = self.problem
+        self._judging.add(player_id)
+        try:
+            verdict = await self.judge.evaluate(problem, code)
+        finally:
+            self._judging.discard(player_id)
+
         progress.submissions += 1
         if progress.best is None or verdict.passed > progress.best.passed:
             progress.best = verdict
@@ -220,12 +249,27 @@ class Round:
     def finish(self, player_id: UUID) -> None:
         self._require(player_id).done = True
 
-    def drop(self, player_id: UUID) -> None:
-        """Forget a player who has disconnected, so nobody waits on them."""
+    def drop(self, player_id: UUID) -> tuple[int, ...]:
+        """Forget a player who has disconnected. Returns the ground they held.
+
+        Their territories go neutral rather than staying theirs. Left owned,
+        they are ground nobody can ever take a turn with and nobody can win
+        past: the last player standing would hold everything that moves and
+        still not be the only owner on the board, so the game would never end.
+
+        The garrisons stay where they are. Neutral troops defend - `_settle`
+        counts an unowned stack like any other - so a player walking off the
+        board does not hand their frontier away for free.
+        """
         _ = self.progress.pop(player_id, None)
         # Their plan goes with them: carrying out orders for somebody who left
         # would move troops the room has no opponent to attribute to.
         _ = self.plan.clear(player_id)
+
+        released = tuple(t.id for t in self.board.territories if t.owner == player_id)
+        for territory_id in released:
+            self.board.territories[territory_id].owner = None
+        return released
 
     # ------------------------------------------------------------------
     # Phases
@@ -341,11 +385,24 @@ class Round:
             out.append(TerritoryUpdate(id=territory_id, owner=owner, soldiers=territory.soldiers))
         return out
 
-    def winner(self) -> UUID | None:
-        """The last player holding ground, once everyone else is out."""
+    def outcome(self) -> Outcome | None:
+        """Whether the game has ended, and who took it. None while it runs.
+
+        Ground held is what counts, not who is still connected: a player whose
+        client died is out of the game the moment their last territory falls,
+        and one who holds the board has won it whether or not the others are
+        still there to watch.
+        """
+        if self.started_with < 2:
+            return None
         standing = {t.owner for t in self.board.territories if t.owner is not None}
-        if len(standing) == 1 and len(self.progress) > 1:
-            return next(iter(standing))
+        if len(standing) == 1:
+            return Outcome(winner=next(iter(standing)))
+        if not standing:
+            # Every territory neutral. Nobody can place - a placement needs
+            # ground of your own or ground beside it - so there is no position
+            # left to play out.
+            return Outcome(winner=None)
         return None
 
     def _require(self, player_id: UUID) -> Progress:

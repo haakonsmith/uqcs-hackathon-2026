@@ -46,7 +46,7 @@ from protocol.terrain import World, WorldMap
 from server import combat, sandbox
 from server.judge import Judge, PlaceholderJudge, SubprocessJudge
 from server.player import Player
-from server.rounds import Round
+from server.rounds import Outcome, Round
 from server.world import generate
 
 logger = logging.getLogger("Server")
@@ -279,9 +279,9 @@ class Server:
         if self.round is None:
             return
 
-        winner_id = self.round.winner()
-        if winner_id is not None:
-            await self._finish_game(winner_id)
+        outcome = self.round.outcome()
+        if outcome is not None:
+            await self._finish_game(outcome)
             return
 
         before = self.round.phase
@@ -296,12 +296,17 @@ class Server:
         logger.info(f"round {state.number}: {before} -> {state.phase} ({state.seconds_left:.0f}s)")
         await self.broadcast(RoundChanged(round=state))
 
-    async def _finish_game(self, winner_id: UUID) -> None:
-        winner = self.players.get(winner_id)
-        name = winner.name if winner is not None else _short(winner_id)
-        logger.info(f"{name} holds the whole board - game over")
+    async def _finish_game(self, outcome: Outcome) -> None:
         self.round = None
-        await self.broadcast(GameOver(winner=str(winner_id), name=name))
+        if outcome.winner is None:
+            logger.info("every territory is neutral - game over with no winner")
+            await self.broadcast(GameOver(winner=None, name="nobody"))
+            return
+
+        winner = self.players.get(outcome.winner)
+        name = winner.name if winner is not None else _short(outcome.winner)
+        logger.info(f"{name} holds the whole board - game over")
+        await self.broadcast(GameOver(winner=str(outcome.winner), name=name))
 
     def _planned(self, round: Round, player_id: UUID) -> Planned:
         """One player's whole plan for the phase, as the answer to a move.
@@ -394,8 +399,10 @@ class Server:
                 if self.round is not None:
                     # Forget them in the round too, or every phase runs its
                     # full clock waiting on somebody who is not coming back.
-                    self.round.drop(player_id)
-                    logger.warning(f"{name} left a game in progress; their territories are now unplayed")
+                    released = self.round.drop(player_id)
+                    if released:
+                        logger.warning(f"{name} left a game in progress - {len(released)} territories went neutral")
+                        await self.broadcast(BoardChanged(updates=self.round.updates(released)))
                 await self.broadcast(LobbyChanged(lobby=self.lobby()))
 
     async def run(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:

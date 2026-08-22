@@ -652,7 +652,15 @@ class App:
             return None
         try:
             response = await self.conn.send(request)
-        except (ConnectionError, TimeoutError, ProtocolError) as error:
+        except TimeoutError:
+            # Not fatal. The socket is fine and the server is most likely still
+            # working - a judge with every slot busy answers late rather than
+            # never. Quitting the game over it, which is what treating this
+            # like a dropped connection did, loses a player their board over a
+            # busy moment they had no part in causing.
+            self._say("no answer yet - the server is busy. Nothing was lost; try again")
+            return None
+        except (ConnectionError, ProtocolError) as error:
             self._say(f"lost the server: {error}")
             self.running = False
             return None
@@ -815,8 +823,9 @@ class App:
                 self.last_verdict = None
                 self._show_popup(hud.battles_popup(battles, dropped))
                 self._say(f"{len(battles)} battles" if battles else "orders carried out")
-            case GameOver(name=name):
-                self._show_popup(hud.game_over_popup(name))
-                self._say(f"{name} has taken the whole board - game over")
+            case GameOver(name=name, winner=winner):
+                self._show_popup(hud.game_over_popup(name, winner))
+                ending = f"{name} has taken the whole board" if winner is not None else "nobody is left holding ground"
+                self._say(f"{ending} - game over")
             case _:
                 logger.debug("unhandled server event %r", event)

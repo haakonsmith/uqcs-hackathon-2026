@@ -22,13 +22,24 @@ from typing import Protocol
 
 from protocol.rounds import CaseResult, CaseStatus, Problem, Verdict
 from server import sandbox
-from server.problems import TestCase, tests_for
+from server.problems import BANK, TestCase, tests_for
 
 logger = logging.getLogger("Judge")
 
 # A submission longer than this is not a solution to a warm-up problem, and
 # the limit costs nothing to enforce before any parsing happens.
 MAX_SOURCE_BYTES = 64 * 1024
+
+# Sandboxes allowed to run at once, across every player. Sized so a full room
+# submitting into the biggest problem in the bank resolves in one wave: queued
+# waves multiply the wall clock a client is waiting on, which is what makes a
+# slow phase look like a dead server. Processes, not threads - the ceiling is
+# the host's, so lower it on a small machine and raise `SubmitSolution`'s
+# timeout to match.
+MAX_EXPECTED_PLAYERS = 6
+# Read off the bank rather than written down, so adding a problem with more
+# cases than any before it widens the pool instead of quietly costing a wave.
+DEFAULT_CONCURRENCY = MAX_EXPECTED_PLAYERS * max((len(entry.tests) for entry in BANK), default=1)
 
 
 class Judge(Protocol):
@@ -100,10 +111,17 @@ class SubprocessJudge:
     A solution gets one process per test case, so a crash on case three does
     not take the other four with it, and state cannot be carried between them.
 
-    `concurrency` bounds how many of those exist at once. Four players
-    submitting into a five-case problem is twenty processes if nothing says
-    otherwise, and the point of the limits is undone if the server melts
-    launching them.
+    `concurrency` bounds how many of those exist at once, across every player
+    rather than per submission - twenty processes if four players hit a
+    five-case problem together, and the point of the limits is undone if the
+    server melts launching them.
+
+    It has to be set against that room-wide total, not against one solution.
+    Below it, submissions queue in waves: at eight slots those twenty cases are
+    three waves, and a solution that times out in every case answers after
+    three times `wall_seconds` rather than one. That is how a busy phase turns
+    into clients giving up on the server. `DEFAULT_CONCURRENCY` covers a full
+    room of the largest problem in the bank in a single wave.
 
     Read `sandbox.ISOLATION.summary()` before trusting this: on a host with no
     `bwrap` or `sandbox-exec` it still runs solutions in a separate process
@@ -111,7 +129,7 @@ class SubprocessJudge:
     server user can.
     """
 
-    def __init__(self, limits: sandbox.Limits | None = None, concurrency: int = 8) -> None:
+    def __init__(self, limits: sandbox.Limits | None = None, concurrency: int = DEFAULT_CONCURRENCY) -> None:
         self.limits: sandbox.Limits = limits or sandbox.Limits()
         self._slots: asyncio.Semaphore = asyncio.Semaphore(concurrency)
 
@@ -179,5 +197,20 @@ def _last_line(text: str) -> str:
 
 
 def compare(case: TestCase, output: str) -> bool:
-    """Whether one captured stdout matches a case, ignoring trailing space."""
-    return output.strip() == case.expected.strip()
+    """Whether one captured stdout matches a case, ignoring trailing space.
+
+    Line by line rather than as one blob. Stripping only the ends of the whole
+    output lets a trailing space midway through a multi-line answer fail a
+    solution that printed the right thing, which is the least explicable way to
+    lose a round: the client shows both as identical because a terminal cannot
+    draw the difference.
+    """
+    return _normalise(output) == _normalise(case.expected)
+
+
+def _normalise(text: str) -> list[str]:
+    """Output as comparable lines: no trailing space, no trailing blanks."""
+    lines = [line.rstrip() for line in text.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines

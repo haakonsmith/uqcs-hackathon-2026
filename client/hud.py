@@ -258,9 +258,10 @@ def battles_popup(battles: list[BattleReport], dropped: list[DroppedOrder] | Non
     return [*lines, "", "[any key] back to the board"]
 
 
-def game_over_popup(name: str) -> list[str]:
+def game_over_popup(name: str, winner: str | None) -> list[str]:
     """The last thing the board has to say."""
-    return ["GAME OVER", "", f"{name} holds the whole board", "", "[any key] back to the board"]
+    verdict = f"{name} holds the whole board" if winner is not None else "every territory is neutral - nobody won"
+    return ["GAME OVER", "", verdict, "", "[any key] back to the board"]
 
 
 def scoreboard(round_state: RoundState | None, me: str) -> list[str]:

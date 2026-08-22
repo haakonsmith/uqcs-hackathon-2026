@@ -35,12 +35,18 @@ class Connection:
         self._pending: dict[str, asyncio.Future[ServerResponse]] = {}
         self.events: asyncio.Queue[ServerEvent] = asyncio.Queue()
 
-    async def send[R](self, request: Request[R], timeout: float = 10.0) -> R:
+    async def send[R](self, request: Request[R], timeout: float | None = None) -> R:
         """Send a request and wait for its answer.
 
         The return type follows from the request: `send(Join(...))` is typed
         `Joined | JoinRejected` with nothing to annotate at the call site.
+
+        Waits `request.timeout_seconds` unless told otherwise. A late answer is
+        dropped rather than mishandled - `_handle` finds no waiter and logs it -
+        so a timeout costs the caller its answer and nothing else.
         """
+        if timeout is None:
+            timeout = type(request).timeout_seconds
         # `Request[R]` is broader than the union the frame accepts: R carries
         # the response type, not the fact of membership. Serialising checks it
         # for real - the adapter rejects anything outside ClientRequest.

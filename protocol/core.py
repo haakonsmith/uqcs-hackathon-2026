@@ -13,6 +13,7 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass
+from typing import ClassVar
 
 
 class ProtocolError(Exception):
@@ -21,7 +22,16 @@ class ProtocolError(Exception):
 
 @dataclass(frozen=True)
 class Request[R]:
-    """R is the response type this request expects. Never stored."""
+    """R is the response type this request expects. Never stored.
+
+    `timeout_seconds` is how long the client waits for the answer. It lives on
+    the request because how long an answer can honestly take is a property of
+    what was asked: a placement is a dictionary write and a submission runs a
+    stranger's code in a sandbox, and one number for both has to be either too
+    patient for the first or too impatient for the second.
+    """
+
+    timeout_seconds: ClassVar[float] = 10.0
 
 
 # Memoised by hand rather than with functools.cache, whose Hashable bound does
