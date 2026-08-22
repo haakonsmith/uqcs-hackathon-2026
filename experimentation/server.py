@@ -1,12 +1,10 @@
 import asyncio
 import random
-import time
-from dataclasses import dataclass
 
-import player
 import websockets
-from player import player
 from websockets.asyncio.server import serve
+
+from .player import player
 
 gameState = {}
 players = {}
@@ -20,13 +18,7 @@ def createWorld():
     return {"numTerritories": 0}
 
 
-class territory:
-    def __init__(self, name, id):
-        self.name = name
-        self.id = id
-
-
-def createTerritory(name, id):  # no arguments for now
+def createTerritory(name: str, id: str):  # no arguments for now
     return {
         "name": name,
         "id": id,
@@ -34,20 +26,20 @@ def createTerritory(name, id):  # no arguments for now
     }
 
 
-async def startMenu(websocket):
+async def startMenu(websocket: websockets.ServerConnection):
     content = await websocket.recv()
     if content == "joinGame":
         players[websocket] = player(websocket)
         if lobbyCount < playersTarget:
-            await websocket.send(f"Logging in")
+            await websocket.send("Logging in")
             await lobby(websocket)
         else:
-            websocket.close(playersTarget, "Lobby is full, please reconnect")
+            await websocket.close(playersTarget, "Lobby is full, please reconnect")
     else:
         await websocket.send("invalid initation (temp)")
 
 
-async def lobby(websocket):
+async def lobby(websocket: websockets.ServerConnection):
     global lobbyCount
     players[websocket].setStatus("LOBBY")
     lobbyCount += 1
@@ -55,16 +47,16 @@ async def lobby(websocket):
     for p in players.values():
         if p.getStatus() == "LOBBY":
             if lobbyCount == playersTarget:
-                await game(websocket)
+                await game()
             await p.getWebSocket().send(f"LOBBY: {lobbyCount}/{playersTarget}")
 
 
 async def game():
     for player in players.values():
-        player.getWebSocket().send(f"Game starting")
+        player.getWebSocket().send("Game starting")
 
 
-async def clients(websocket):
+async def clients(websocket: websockets.ServerConnection):
     try:
         await startMenu(websocket)
         await websocket.wait_closed()

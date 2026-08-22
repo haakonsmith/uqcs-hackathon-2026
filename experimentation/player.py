@@ -7,8 +7,8 @@ Position = tuple[int, int]
 @dataclass
 class currentAction:
     mouseHover: bool = False
-    mousePos: tuple = (0, 0)
-    mouseTile: tuple = (0, 0)
+    mousePos: Position = (0, 0)
+    mouseTile: Position = (0, 0)
     mouseClick: bool = False  # temp i guess
 
 
