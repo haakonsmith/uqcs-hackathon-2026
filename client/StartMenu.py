@@ -1,5 +1,6 @@
 import time
 import blessed
+from GetUsername import get_username
 
 # --- Solid Block Title Art ("TERMINATION") ---
 TITLE_ART = [
@@ -136,7 +137,7 @@ def render_menu_buttons(term: blessed.Terminal, selected_idx: int):
                 output.append(term.move_xy(bx, by) + term.bold_black_on_white(btn_str))
             else:
                 # UNSELECTED BUTTON: Clean retro style (e.g., Bold Cyan text on Blue background)
-                output.append(term.move_xy(bx, by) + term.bold_cyan_on_blue(btn_str))
+                output.append(term.move_xy(bx, by) + term.bold_white_on_blue(btn_str))
 
     print("".join(output), end="", flush=True)
 
@@ -158,11 +159,12 @@ def handle_action(term, action):
         time.sleep(1)
         return False
     elif action == "JOIN GAME":
+            username = get_username(term)
+
             # 1. Clear the entire screen to black
             term.clear()
-        
             # 2. Show only the centered message
-            msg = f"Opening: {action}..."
+            msg = f"Welcome, {username}! Loading game..."
             mx = max(0, (term.width - len(msg)) // 2)
             my = term.height // 2
             print(term.move_xy(mx, my) + term.black_on_white(msg), end="", flush=True)
