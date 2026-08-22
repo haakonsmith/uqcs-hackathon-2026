@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import blessed
 
 import terrain
-from viewer import CELL_WIDTH, territory_color
+from viewer import CELL_WIDTH, Color, territory_color
 
 SEED = 42
 
@@ -174,7 +174,7 @@ def render(
     world: terrain.WorldMap,
     view: Viewport,
     overlay: bool,
-    highlight_territory: int | None,
+    highlight_territories: dict[int, Color | bool | None],
 ) -> str:
     """Colour render of the visible slice, two columns per cell.
 
@@ -185,9 +185,12 @@ def render(
     for row in world.grid[view.y : view.y + view.span_y : view.zoom]:
         parts: list[str] = []
         for cell in row[view.x : view.x + view.span_x : view.zoom]:
-            highlighted = highlight_territory is not None and cell.territory == highlight_territory
-            if cell.territory is not None and (highlighted or overlay):
-                parts.append(term.on_color_rgb(*territory_color(cell.territory)))
+            if cell.territory is not None:
+                highlight = highlight_territories[cell.territory]
+                if highlight:
+                    color = territory_color(cell.territory) if highlight == True or overlay else highlight
+                    parts.append(term.on_color_rgb(*color))
+
             else:
                 parts.append(term.on_color_rgb(*cell.terrain.color))
             parts.append(" " * CELL_WIDTH)
