@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 import numpy as np
 from numpy.typing import NDArray
 
-from protocol.terrain import Cell, Terrain, Territory, WorldMap, World
+from protocol.terrain import Cell, Terrain, Territory, World, WorldMap
 
 # Used when a board is generated without a lobby to take player ids from.
 PLAYER_COUNT = 4
@@ -208,9 +208,17 @@ def _fbm(
 
 
 def _coordinates(width: int, height: int, scale: float) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    xs = np.arange(width, dtype=np.float64) / scale
-    ys = np.arange(height, dtype=np.float64) / scale
-    return np.broadcast_arrays(xs[None, :], ys[:, None])  # ty: ignore[invalid-return-type]
+    """Sample coordinates for a `height` x `width` grid, as a row and a column.
+
+    Left un-expanded at (1, W) and (H, 1): `_perlin` and `_fbm` broadcast
+    their inputs, so numpy pairs them up on the way through and every result
+    still comes out (H, W). `np.broadcast_arrays` would do the same pairing
+    eagerly, and is typed `tuple[NDArray[Any], ...]` - a variadic tuple of
+    unknown dtype, which no annotation here can narrow.
+    """
+    xs: NDArray[np.float64] = np.arange(width, dtype=np.float64) / scale
+    ys: NDArray[np.float64] = np.arange(height, dtype=np.float64) / scale
+    return xs[None, :], ys[:, None]
 
 
 # Arbitrary offsets that decorrelate fields sharing one permutation table.
