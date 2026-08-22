@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "blessed>=1.48.0",
+    "logging>=0.4.9.6",
     "numpy>=2.5.2",
     "pandas>=3.0.5",
     "uuid64>=0.2.0",

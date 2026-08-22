@@ -1,10 +1,13 @@
 import asyncio
+import json
+import logging
 import random
 
 import websockets
 from websockets.asyncio.server import serve
+from websockets.exceptions import ConnectionClosedError
 
-from .player import player
+import server.player
 
 gameState = {}
 players = {}
@@ -72,9 +75,44 @@ async def clients(websocket: websockets.ServerConnection):
             del players[websocket]
 
 
+class Server:
+    def __init__(self) -> None:
+        self.connections: set[websockets.ServerConnection] = set()
+
+    async def register_connection(self, websocket: websockets.ServerConnection):
+        logging.info("Connection received")
+        self.connections.add(websocket)
+
+        async for message in websocket:
+            if isinstance(message, str):
+                event = json.loads(message)
+
+                print(f"got event {event}")
+
+    async def handler(self, websocket: websockets.ServerConnection):
+        try:
+            await self.register_connection(websocket)
+        except ConnectionClosedError:
+            logging.warning("Connection abruptly closed!")
+        finally:
+            self.connections.remove(websocket)
+
+    async def run(self):
+
+        async with serve(
+            self.handler,
+            "localhost",
+            8888,
+            ping_interval=None,
+            max_size=64 * 1024 * 1024,
+        ):
+            logging.info("Server started")
+            await asyncio.Future()
+
+
 async def main():
-    server = await serve(clients, "localhost", 8765)
-    await server.serve_forever()
+    server = Server()
+    await server.run()
 
 
 if __name__ == "__main__":
