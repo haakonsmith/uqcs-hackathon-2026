@@ -17,10 +17,12 @@ clears both, `f` says you are finished with the phase and `tab` shows the
 scoreboard.
 
 Troops are placed and marched in the one phase, and neither happens as you ask
-for it. Both are secret until the phase ends - your own show as a `(+n)` beside
-the garrison they will join - and then they all happen together: what you
-placed lands first, so it can march the same turn, and the biggest stack in a
-territory takes it, losing as many troops as the next biggest had.
+for it. They go on your own ground, or on ground touching it - the first
+reinforces, the second assaults. Both are secret until the phase ends - your
+own show as a `(+n)` beside the garrison they will join - and then they all
+happen together: what you placed lands first, so it can march the same turn,
+and the biggest stack in a territory takes it, losing as many troops as the
+next biggest had.
 
 Joining lands in a lobby. The server generates the board only once every
 player there has readied up, so the board arrives as a push rather than as

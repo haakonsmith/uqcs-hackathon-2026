@@ -10,6 +10,10 @@ phases in that order, and the strategy depended on it: reinforcements a player
 put down were theirs to attack with the same turn, and folding the two phases
 into one should not have taken that away.
 
+Troops go on your own ground or on ground touching it. On your own they join
+the garrison; next door they are an assault, and arrive the same way a march
+does - so a player with nothing worth marching can still push a frontier.
+
 Resolution is a headcount, not a dice roll:
 
 - every order leaves its source, whether or not it arrives anywhere useful
@@ -128,10 +132,13 @@ def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int
     Nothing is written: a placement is part of the plan until the phase ends,
     so all that happens here is the refusal a player would otherwise only
     discover when their troops failed to appear.
+
+    Reach, not ownership: troops may also be dropped on a neighbour of
+    something the player holds, which resolves as an assault on it.
     """
     territory = _territory(board, territory_id)
-    if territory.owner != player:
-        raise IllegalMove(f"territory {territory_id} is not yours")
+    if territory.owner != player and not _borders(board, player, territory):
+        raise IllegalMove(f"territory {territory_id} is neither yours nor next to yours")
     if count < 1:
         raise IllegalMove("place at least one soldier")
 
@@ -139,20 +146,24 @@ def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int
 def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
     """Carry out a whole phase at once: troops land, then everybody marches."""
     touched: set[int] = set()
+    # territory -> owner -> troops arriving
+    arrivals: dict[int, dict[UUID, int]] = defaultdict(lambda: defaultdict(int))
 
     # Reinforcements first, so they are part of the garrison the orders below
-    # march out of and fight with.
+    # march out of and fight with. Troops placed on somebody else's ground
+    # never garrison it: they arrive on it, and are settled with everything
+    # else that lands there.
     for player, placements in plan.placements.items():
         for territory_id, count in placements.items():
             territory = board.territories[territory_id]
-            if territory.owner != player:
-                logger.debug("dropping %d placed on %s: no longer theirs", count, territory_id)
+            if territory.owner == player:
+                territory.soldiers += count
+            elif _borders(board, player, territory):
+                arrivals[territory_id][player] += count
+            else:
+                logger.debug("dropping %d placed on %s: out of reach", count, territory_id)
                 continue
-            territory.soldiers += count
             touched.add(territory_id)
-
-    # territory -> owner -> troops arriving
-    arrivals: dict[int, dict[UUID, int]] = defaultdict(lambda: defaultdict(int))
 
     for player, player_orders in plan.orders.items():
         for order in player_orders:
@@ -223,6 +234,11 @@ def _settle(
 def eliminated(board: WorldMap, player: UUID) -> bool:
     """True once a player holds no ground at all."""
     return not any(t.owner == player for t in board.territories)
+
+
+def _borders(board: WorldMap, player: UUID, territory: Territory) -> bool:
+    """True when the player holds something the territory touches."""
+    return any(board.territories[n].owner == player for n in territory.neighbours)
 
 
 def _name(owner: UUID | None, names: dict[UUID, str]) -> str:

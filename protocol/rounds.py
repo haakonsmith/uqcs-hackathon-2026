@@ -10,9 +10,10 @@ first perfect solution lands - whoever solves it first sets a deadline for
 everybody else rather than ending the phase from under them.
 
 `commanding` is a player's whole turn on the board: the troops those solutions
-earned go onto owned territories, and marches are ordered out of them. It ends
-early once every player says they are done, so a room that is ready does not
-sit watching a clock.
+earned go onto owned territories or onto ground bordering them - reinforcing
+the first, assaulting the second - and marches are ordered out of what is
+owned. It ends early once every player says they are done, so a room that is
+ready does not sit watching a clock.
 
 Placing and marching were phases of their own, in that order, and are one
 phase now: the second was only ever the first with the troops already down, so

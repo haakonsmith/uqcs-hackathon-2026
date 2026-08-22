@@ -135,7 +135,10 @@ class SubmitSolution(Request[Judged | Refused]):
 
 @dataclass(frozen=True)
 class PlaceTroops(Request[Planned | Refused]):
-    """Promise `count` of this round's troops to a territory already owned.
+    """Promise `count` of this round's troops to a territory within reach.
+
+    That is one the player already owns, or one bordering something they own -
+    where the troops arrive as an assault rather than as a garrison.
 
     Nothing reaches the board here. The troops join the plan and land when the
     phase ends, so until then they are a `(+n)` on one player's screen.

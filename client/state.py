@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from dataclasses import dataclass, field, replace
 from uuid import UUID
 
@@ -132,6 +133,10 @@ class App:
     # while it is up nothing else reads the keyboard - a verdict that
     # scrolls past in a status bar is a verdict nobody saw.
     popup: list[str] | None = None
+    # When a held popup may be dismissed, on the monotonic clock. Panels that
+    # arrive unasked - the reveal, the winner - are held for a few seconds so
+    # they cannot be closed by a key already on its way down.
+    popup_hold_until: float = 0.0
     # Troops the next place or march will move, set with the number keys.
     move_count: int = 1
     # The last verdict, kept so [v] can bring it back. Dismissing a popup
@@ -225,9 +230,17 @@ class App:
         moved = False
 
         if self.popup is not None:
+            # Nudging the mouse is not "any key". Motion arrives as a
+            # keystroke here and a hand resting on the desk produces a stream
+            # of it, which used to close a panel the moment it appeared.
+            if (key.name or "").startswith("MOUSE_") and key.name != "MOUSE_LEFT":
+                return
+            if time.monotonic() < self.popup_hold_until:
+                return
             # The panel was drawn over the terrain, so the terrain under it
             # has to be drawn again to erase it.
             self.popup = None
+            self.popup_hold_until = 0.0
             self.dirty = True
             return
 
@@ -253,8 +266,7 @@ class App:
         if key in ("?", "/"):
             # `/` too: `?` is shift+/ and getting the shift wrong should still
             # open the help rather than do nothing.
-            self.popup = hud.help_popup(self.round, self.term.height)
-            self.dirty = True
+            self._show_popup(hud.help_popup(self.round, self.term.height))
             return
         if await self._handle_phase_key(key):
             return
@@ -320,8 +332,7 @@ class App:
         if self.last_verdict is None:
             self._say("no submission yet this round")
             return
-        self.popup = hud.verdict_popup(self.last_verdict, self.round, self.me)
-        self.dirty = True
+        self._show_popup(hud.verdict_popup(self.last_verdict, self.round, self.me))
 
     async def _submit(self) -> None:
         """Open the player's editor, then submit whatever they saved."""
@@ -360,11 +371,15 @@ class App:
         """Promise troops to a territory. `count` of None means all in hand.
 
         Nothing lands on the board here either: the answer comes back as a
-        `(+n)` on the territory, and the troops arrive when the phase ends.
+        `(+n)` on the territory, and the troops arrive when the phase ends -
+        joining the garrison on your own ground, or assaulting it next door.
         """
         territory = self._target_territory()
         if territory is None:
             self._say("click a territory, or pick one with [n]")
+            return
+        if not self._in_reach(territory):
+            self._say("place on your own ground, or on ground touching it")
             return
 
         mine = self.round.player(self.me) if self.round else None
@@ -459,13 +474,29 @@ class App:
         """What `n` cycles through, which depends on what you are doing.
 
         Mid-order that is the neighbours worth marching on; otherwise it is
-        your own ground, which is what both placing and picking a source want.
+        everywhere troops may go - your own ground, then the ground touching
+        it - with your own first, because a march can only start there.
         """
         mine = self._my_uuid()
         if self.round is not None and self.round.phase == "commanding" and self.move_from is not None:
             source = self.world.territories[self.move_from]
             return sorted(n for n in source.neighbours if self.world.territories[n].owner != mine)
-        return sorted(t.id for t in self.world.territories if t.owner == mine)
+
+        held = sorted(t.id for t in self.world.territories if t.owner == mine)
+        touching = {n for t in held for n in self.world.territories[t].neighbours}
+        return [*held, *sorted(touching.difference(held))]
+
+    def _in_reach(self, territory_id: int) -> bool:
+        """Whether troops may be placed here: yours, or bordering yours.
+
+        The server decides, but it is the same rule either way and a refusal
+        that arrives after a round trip reads as the click having missed.
+        """
+        mine = self._my_uuid()
+        if mine is None:
+            return False
+        target = self.world.territories[territory_id]
+        return target.owner == mine or any(self.world.territories[n].owner == mine for n in target.neighbours)
 
     def _cycle(self, step: int) -> None:
         """Step through the selectable territories, scrolling each into view."""
@@ -481,7 +512,10 @@ class App:
         self.selected = options[index]
         self._centre_on(self.selected)
         held = self.world.territories[self.selected]
-        self._say(f"territory {self.selected} ({held.soldiers} soldiers) - {index + 1}/{len(options)}")
+        # Whose it is, because the list now runs past your own ground into
+        # what borders it, and placing on those two means different things.
+        whose = " - theirs" if self.round is not None and held.owner != self._my_uuid() else ""
+        self._say(f"territory {self.selected} ({held.soldiers} soldiers{whose}) - {index + 1}/{len(options)}")
 
     def _centre_on(self, territory_id: int) -> None:
         """Put a territory in the middle of the screen, so a pick is visible."""
@@ -519,7 +553,7 @@ class App:
                 self.round = round_state
                 self.last_verdict = verdict
                 self._say(verdict.summary())
-                self.popup = hud.verdict_popup(verdict, round_state, self.me)
+                self._show_popup(hud.verdict_popup(verdict, round_state, self.me))
             case Planned(placements=placements, orders=orders, remaining=remaining, round=round_state):
                 self.round = round_state
                 self.placements = {p.territory: p.count for p in placements}
@@ -554,6 +588,26 @@ class App:
     def _say(self, message: str) -> None:
         self.message = message
         self.dirty = True
+
+    def _show_popup(self, lines: list[str], hold: float = 0.0) -> None:
+        """Put a panel up, refusing to close it for `hold` seconds."""
+        self.popup = lines
+        self.popup_hold_until = time.monotonic() + hold if hold else 0.0
+        self.dirty = True
+
+    def _panel(self) -> list[str]:
+        """The popup as it should be drawn right now.
+
+        A held panel's last line is its dismiss hint, and while pressing a key
+        would do nothing the hint says when it will start working instead. The
+        countdown moves because the phase clock repaints once a second anyway.
+        """
+        if self.popup is None:
+            return []
+        left = self.popup_hold_until - time.monotonic()
+        if left <= 0 or not self.popup:
+            return self.popup
+        return [*self.popup[:-1], hud.hold_notice(left)]
 
     def _handle_mouse(self, key: Keystroke) -> bool:
         # Keystroke reports mouse position as mouse_xy, not .x / .y, and gives
@@ -604,7 +658,7 @@ class App:
             frame.row(view.drawn_rows + offset, text)
 
         if self.popup is not None:
-            hud.draw_panel(frame, self.popup)
+            hud.draw_panel(frame, self._panel())
         elif self.scoreboard:
             hud.draw_panel(frame, hud.scoreboard(self.round, self.me))
 
@@ -641,10 +695,10 @@ class App:
                 self.refresh_hover()
                 self.dirty = True
             case MovesResolved(battles=battles):
-                self.popup = hud.battles_popup(battles)
+                self._show_popup(hud.battles_popup(battles), hold=hud.reveal_hold(battles))
                 self._say(f"{len(battles)} battles" if battles else "orders carried out")
             case GameOver(name=name):
-                self.popup = ["GAME OVER", "", f"{name} holds the whole board", "", "[any key] back to the board"]
+                self._show_popup(hud.game_over_popup(name), hold=hud.GAME_OVER_HOLD_SECONDS)
                 self._say(f"{name} has taken the whole board - game over")
             case _:
                 logger.debug("unhandled server event %r", event)

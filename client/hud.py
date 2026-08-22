@@ -7,6 +7,8 @@ frame changes hardly at all.
 
 from __future__ import annotations
 
+import math
+
 from client.screen import Color, Screen
 from client.viewport import Viewport
 from protocol.rounds import BattleReport, Phase, RoundState, Verdict
@@ -34,7 +36,7 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("[f]", "finished - ends the phase once everyone is"),
     ],
     "commanding": [
-        ("click", "place troops on your own territory"),
+        ("click", "reinforce your ground, or assault ground beside it"),
         ("[space]", "place on the picked territory"),
         ("[p]", "place every troop you have left"),
         ("[m]", "march from here, then click a neighbour"),
@@ -60,13 +62,15 @@ RULES_HELP: list[str] = [
     "A round is submit, then command.",
     "Troops earned = 3 + territories/3 + up to 5 for your",
     "solution, +3 for solving first.",
-    "Place them on your own ground and march out of it in",
-    "the one phase. Both are secret, shown to you as (+n)",
-    "beside a garrison, and both happen when the phase",
-    "ends: troops land first, so what you place can march",
-    "the same turn. The biggest stack in a territory takes",
-    "it, losing as many troops as the next biggest. A tie",
-    "wipes both out and leaves it unowned.",
+    "Place them on your own ground to reinforce it, or on",
+    "ground touching yours to assault it, and march out of",
+    "your own - all in the one phase. Both are secret,",
+    "shown to you as (+n) beside a garrison, and both",
+    "happen when the phase ends: troops land first, so what",
+    "you place can march the same turn. The biggest stack",
+    "in a territory takes it, losing as many troops as the",
+    "next biggest. A tie wipes both out and leaves it",
+    "unowned.",
 ]
 
 
@@ -196,6 +200,34 @@ def battles_popup(battles: list[BattleReport]) -> list[str]:
         outcome = f"{battle.winner_name} holds it with {battle.survivors}" if battle.winner else "wiped out - unowned"
         lines += [f"territory {battle.territory}: {sides}", f"    {outcome}"]
     return [*lines, "", "[any key] back to the board"]
+
+
+def game_over_popup(name: str) -> list[str]:
+    """The last thing the board has to say."""
+    return ["GAME OVER", "", f"{name} holds the whole board", "", "[any key] back to the board"]
+
+
+# How long the reveal is held on screen before a key will put it away. This is
+# the one panel nobody chose to open - it arrives the instant the phase ends,
+# on top of whatever the player was doing - so without a hold it goes to the
+# key they were already pressing. A long report earns proportionally longer,
+# up to a cap, since a whole board's worth of fighting is a lot to take in.
+REVEAL_HOLD_SECONDS = 6.0
+REVEAL_HOLD_PER_BATTLE = 1.5
+REVEAL_HOLD_LIMIT = 25.0
+
+# The winner's panel ends the game, so there is nothing to get back to.
+GAME_OVER_HOLD_SECONDS = 12.0
+
+
+def reveal_hold(battles: list[BattleReport]) -> float:
+    """Seconds `battles_popup` should stay up before it can be dismissed."""
+    return min(REVEAL_HOLD_LIMIT, REVEAL_HOLD_SECONDS + REVEAL_HOLD_PER_BATTLE * len(battles))
+
+
+def hold_notice(seconds: float) -> str:
+    """Replaces a popup's dismiss hint for as long as the hint would be a lie."""
+    return f"[any key] in {math.ceil(seconds)}s"
 
 
 def where(world: WorldMap, view: Viewport) -> str:
