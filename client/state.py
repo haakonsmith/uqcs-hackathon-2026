@@ -215,8 +215,9 @@ class App:
         side = self.factions.side_of.get(owner.id)
         held = self.factions.label(side) if side is not None else "nobody"
         soldiers = f"{owner.soldiers} soldiers{self._placed_suffix(owner.id)}"
-        detail = f"territory {owner.id} held by {held}, {soldiers}, {len(owner.neighbours)} neighbours"
-        self.hover = f"{where} - {detail}"
+        # Who holds it and how strongly. The neighbour count was here too and
+        # answered a question nobody asks while deciding a move.
+        self.hover = f"{where} - {held}, {soldiers}"
         self.highlights[owner.id] = True
         self.dirty = True
 
@@ -598,7 +599,7 @@ class App:
         # plus the keys that work right now.
         bars = [
             hud.phase_line(self.round, self.me, self.message),
-            f" {hud.where(self.world, view)}  {self.hover}" + hud.key_line(self.round, self.move_from),
+            f" {self.hover}" + hud.key_line(self.round, self.move_from),
         ]
         for offset, text in enumerate(bars):
             frame.row(view.drawn_rows + offset, text)

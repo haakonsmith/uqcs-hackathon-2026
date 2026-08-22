@@ -22,6 +22,9 @@ from typing import Literal, assert_never
 import blessed
 
 from client.input import AppEvent, KeyPress, Received, Resized
+from client.palette import Color
+from client.render import CELL_WIDTH
+from protocol.terrain import Terrain
 
 DEFAULT_ADDRESS = "ws://localhost:8888"
 DEFAULT_USERNAME = "Player"
@@ -77,6 +80,24 @@ MENU_ITEMS = [
     MenuItem("settings", "SETTINGS", "top_right"),
     MenuItem("exit", "EXIT", "center_bottom"),
 ]
+
+# The menu map is painted from the same palette the board is, so the sea and
+# the ground a player sees here are the sea and ground they are about to play
+# on. `#` is open country and `@` the darker cover behind it, which is what
+# gives the landmasses their shape.
+#
+# Shallow rather than deep water: it is the commoner of the two on a generated
+# board - about a third of it against a quarter - so it is the sea a player
+# actually recognises from the game.
+MENU_WATER: Color = Terrain.SHALLOW_WATER.color
+MENU_LAND: Color = Terrain.GRASS.color
+MENU_COVER: Color = Terrain.FOREST.color
+
+# The title stays red - it is the game's name, not part of the map - but the
+# two shades are kept apart the way the map's are, so the lettering reads as
+# lit and shadowed rather than flat.
+TITLE_BRIGHT: Color = (196, 62, 54)
+TITLE_SHADOW: Color = (120, 34, 30)
 
 TITLE_TOP = 1
 MAP_OFFSET_Y = 2
@@ -143,6 +164,16 @@ def button_geometry(index: int, width: int, height: int) -> tuple[int, int, int]
     return max(0, (width - length) // 2), height // 2 + 4, length
 
 
+def _block(term: blessed.Terminal, color: Color, glyph: str = "██") -> str:
+    """A run of solid colour.
+
+    Foreground and background are both set. A block glyph fills its cell on
+    most fonts and not on all, and where it does not the background is what
+    shows, so setting only one of the two leaves gaps on some terminals.
+    """
+    return term.color_rgb(*color) + term.on_color_rgb(*color) + glyph
+
+
 def _backdrop(term: blessed.Terminal) -> str:
     """Ocean, landmasses and title, sized to the terminal."""
     return _render_backdrop(term, term.width, term.height)
@@ -164,32 +195,29 @@ def _render_backdrop(term: blessed.Terminal, width: int, height: int) -> str:
     # inferred list of it rejects the plain strings appended below.
     output: list[str] = [term.home]
 
-    map_height = len(WORLD_MAP)
-    map_width = len(WORLD_MAP[0]) * 2
-    start_y = max(0, (height - map_height) // 2) + MAP_OFFSET_Y
-    start_x = max(0, (width - map_width) // 2)
+    # Counted in map cells, not screen columns. Each cell is two columns wide,
+    # because terminal cells are about twice as tall as they are wide and a 1:1
+    # map comes out sheared - and centring in columns is how the island used to
+    # vanish. An odd offset put every cell half a step out of phase with a loop
+    # that can only start on even columns, so on half of all terminal widths
+    # nothing matched and the whole map came out as open sea.
+    screen_cells = width // CELL_WIDTH
+    start_cell = max(0, (screen_cells - len(WORLD_MAP[0])) // 2)
+    start_y = max(0, (height - len(WORLD_MAP)) // 2) + MAP_OFFSET_Y
     rows = {start_y + index: row for index, row in enumerate(WORLD_MAP)}
 
     for y in range(height):
         row = rows.get(y, "")
         cells: list[str] = []
-        # Two columns per map cell, because terminal cells are about twice as
-        # tall as they are wide and a 1:1 map comes out sheared.
-        for x in range(0, width - 1, 2):
-            column = (x - start_x) // 2
-            in_bounds = x >= start_x and (x - start_x) % 2 == 0 and column < len(row)
-            
-            land = in_bounds and row[column] == "#"
-            at_symbol = in_bounds and row[column] == "@"
-
-            if land:
-                cells.append(term.green_on_blue("██"))
-            elif at_symbol:
-                cells.append(term.darkgreen_on_blue("██"))
-                #cells.append(term.red_on_blue("██"))
-                #print("test")
+        for cell in range(screen_cells):
+            column = cell - start_cell
+            char = row[column] if 0 <= column < len(row) else " "
+            if char == "#":
+                cells.append(_block(term, MENU_LAND))
+            elif char == "@":
+                cells.append(_block(term, MENU_COVER))
             else:
-                cells.append(term.blue_on_blue("██"))
+                cells.append(_block(term, MENU_WATER))
         output.append(term.move_xy(0, y) + "".join(cells))
 
     for index, line in enumerate(TITLE_ART):
@@ -201,11 +229,13 @@ def _render_backdrop(term: blessed.Terminal, width: int, height: int) -> str:
             x = left + offset
             if 0 <= x < width:
                 if char == "█":
-                    output.append(term.move_xy(x, y) + term.red_on_blue("█"))
+                    output.append(term.move_xy(x, y) + _block(term, TITLE_BRIGHT, "█"))
                 elif char == "@":
-                    output.append(term.move_xy(x, y) + term.darkred_on_blue("█"))
+                    output.append(term.move_xy(x, y) + _block(term, TITLE_SHADOW, "█"))
                 else:
-                    output.append(term.move_xy(x, y) + term.blue_on_blue(" "))
+                    # Solid water over the gaps inside the letters, so the map
+                    # never shows through them.
+                    output.append(term.move_xy(x, y) + _block(term, MENU_WATER, " "))
     return "".join(output)
 
 
