@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import blessed
@@ -64,6 +65,10 @@ MENU_ITEMS = [
 
 TITLE_TOP = 1
 MAP_OFFSET_Y = 2
+
+# Panels are drawn at a fixed minimum width so that typing into one does not
+# make the box breathe in and out a column at a time.
+PANEL_WIDTH = 48
 
 
 @dataclass(frozen=True)
@@ -170,24 +175,61 @@ def _paint(term: blessed.Terminal, backdrop: bool) -> None:
     _ = sys.stdout.flush()
 
 
-def notice(term: blessed.Terminal, text: str) -> None:
-    """Replace the screen with one centred line. Used for progress and errors."""
-    print(term.home + term.clear, end="")
-    x = max(0, (term.width - len(text)) // 2)
-    print(term.move_xy(x, term.height // 2) + term.black_on_white(f" {text} "), end="")
+def _panel(term: blessed.Terminal, lines: Sequence[str]) -> str:
+    """A centred box of text, laid over whatever is already on screen."""
+    width = max(PANEL_WIDTH, max((len(line) for line in lines), default=0) + 4)
+    width = min(width, term.width)
+    # A blank row top and bottom, so the box reads as a box and not as text
+    # dropped on the map.
+    rows = ["", *lines, ""]
+    top = max(0, (term.height - len(rows)) // 2)
+    left = max(0, (term.width - width) // 2)
+
+    output: list[str] = []
+    for index, text in enumerate(rows):
+        y = top + index
+        if y >= term.height:
+            break
+        output.append(term.move_xy(left, y) + term.bold_white_on_blue(text.center(width)[:width]))
+    return "".join(output)
+
+
+def notice(term: blessed.Terminal, *lines: str) -> None:
+    """Show a panel over the menu. Used for progress that passes on its own.
+
+    The menu is repainted underneath rather than the screen cleared, so
+    connecting looks like a step in the menu instead of the app vanishing.
+    """
+    print(_backdrop(term) + _buttons(term) + _panel(term, lines), end="")
     _ = sys.stdout.flush()
+
+
+async def alert(term: blessed.Terminal, events: asyncio.Queue[AppEvent], *lines: str) -> None:
+    """Show a panel and wait for the player to dismiss it.
+
+    Errors used to sit on screen for a fixed two seconds, which is too long to
+    watch and too short to read a socket error in. This waits instead.
+    """
+    body = (*lines, "", "[any key] back to menu")
+    notice(term, *body)
+
+    while True:
+        match await events.get():
+            case Resized():
+                notice(term, *body)
+            case Received():
+                continue
+            case KeyPress(key=key):
+                name = key.name or ""
+                # Mouse motion is a keystroke here, and dismissing on it would
+                # blink the panel away before it has been read.
+                if not name.startswith("MOUSE_") or name == "MOUSE_LEFT":
+                    return
 
 
 def _draw_prompt(term: blessed.Terminal, title: str, buffer: str, hint: str) -> None:
-    lines = [term.bold_yellow(title), term.cyan(f"> {buffer}_"), term.dim_white(hint)]
-    top = term.height // 2 - 2
-    output = [term.home + term.clear]
-    for index, line in enumerate((lines[0], "", lines[1], "", lines[2])):
-        # Centre on the visible text, not on the escape sequences padding it.
-        plain = term.strip_seqs(line)
-        output.append(term.move_xy(max(0, (term.width - len(plain)) // 2), top + index) + line)
-    print("".join(output), end="")
-    _ = sys.stdout.flush()
+    # The cursor is hidden app-wide, so the caret is drawn as text.
+    notice(term, title, "", f"> {buffer}_", "", hint)
 
 
 async def prompt(

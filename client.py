@@ -36,7 +36,7 @@ from client.input import (
     pump_server,
     watch_resize,
 )
-from client.menu import JoinGame, Quit, notice, run_menu
+from client.menu import JoinGame, Quit, alert, notice, run_menu
 from client.state import App
 from protocol import Connection, Join, JoinRejected
 
@@ -65,12 +65,11 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
     a wrong address or a server that isn't up is a normal thing to do, not a
     crash.
     """
-    notice(term, f"{username} connecting to {address} ...")
+    notice(term, "CONNECTING", "", address, f"as {username}")
     try:
         socket = await asyncio.wait_for(websockets.connect(address), timeout=5.0)
     except (TimeoutError, OSError, websockets.InvalidURI) as error:
-        notice(term, f"could not connect: {error}")
-        await asyncio.sleep(2)
+        await alert(term, events, "COULD NOT CONNECT", "", address, str(error))
         return
 
     async with socket:
@@ -78,10 +77,10 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
         reader = asyncio.create_task(conn.run())
         forwarder = asyncio.create_task(pump_server(conn.events, events))
         try:
+            notice(term, "JOINING", "", address, f"as {username}")
             joined = await conn.send(Join(room="lobby"))
             if isinstance(joined, JoinRejected):
-                notice(term, f"join refused: {joined.reason}")
-                await asyncio.sleep(2)
+                await alert(term, events, "JOIN REFUSED", "", joined.reason)
                 return
 
             # The server owns the board and hands it over on the way in, so
@@ -89,8 +88,7 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
             # would disagree the moment a parameter drifted.
             await play(App(term=term, world=joined.world.to_map()), events)
         except ConnectionError as error:
-            notice(term, f"connection lost: {error}")
-            await asyncio.sleep(2)
+            await alert(term, events, "CONNECTION LOST", "", str(error))
         finally:
             for task in (reader, forwarder):
                 _ = task.cancel()
