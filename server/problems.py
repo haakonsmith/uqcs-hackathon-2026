@@ -34,40 +34,6 @@ class Entry:
 BANK: tuple[Entry, ...] = (
     Entry(
         problem=Problem(
-            id="sum-pairs",
-            title="Sum of Pairs",
-            statement=("Read an integer n, then n integers. Print how many unordered pairs of them sum to exactly 100."),
-            signature="stdin: n, then n integers -> stdout: one integer",
-            examples=[("4\\n50 50 60 40", "2"), ("3\\n1 2 3", "0")],
-        ),
-        tests=(
-            TestCase("4\n50 50 60 40", "2"),
-            TestCase("3\n1 2 3", "0"),
-            TestCase("5\n0 100 50 50 100", "3"),
-            TestCase("1\n100", "0"),
-            TestCase("6\n99 1 98 2 97 3", "3"),
-        ),
-    ),
-    Entry(
-        problem=Problem(
-            id="run-length",
-            title="Run Length",
-            statement=(
-                "Read one line of lowercase letters. Print its run-length encoding: each run as the character followed by its length, with no separators."
-            ),
-            signature="stdin: one line -> stdout: one line",
-            examples=[("aaabbc", "a3b2c1"), ("z", "z1")],
-        ),
-        tests=(
-            TestCase("aaabbc", "a3b2c1"),
-            TestCase("z", "z1"),
-            TestCase("abcd", "a1b1c1d1"),
-            TestCase("aaaaaaaaaa", "a10"),
-            TestCase("aabbaabb", "a2b2a2b2"),
-        ),
-    ),
-    Entry(
-        problem=Problem(
             id="remove-duplicates",
             title="Remove Duplicates",
             statement=(
@@ -96,6 +62,206 @@ BANK: tuple[Entry, ...] = (
             TestCase("Hello", "Hello Hello Hello"),
             TestCase("Python", "Python Python Python"),
             TestCase("A", "A A A"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 011",
+            title="Vowel Vacuum",
+            statement="Read a single lowercase word. Print a new string containing only the vowels (a, e, i, o, u) from the original word in the order they appeared. If there are no vowels, print an empty line.",
+            signature="stdin: one string -> stdout: one string",
+            examples=[("programming", "oai")],
+        ),
+        tests=(
+            TestCase("programming", "oai"),
+            TestCase("apple", "ae"),
+            TestCase("rhythm", ""),
+            TestCase("beautiful", "eauiu"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 012",
+            title="Pizza Party Leftovers",
+            statement="Read two space-separated integers: the total number of pizza slices S, and the number of people P. Everyone must get the exact same amount of whole slices. Print the number of slices left over.",
+            signature="stdin: two space-separated integers -> stdout: one integer",
+            examples=[("15 4", "3")],
+        ),
+        tests=(
+            TestCase("15 4", "3"),
+            TestCase("8 8", "0"),
+            TestCase("5 10", "5"),
+            TestCase("100 3", "1"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="MED 001",
+            title="Adjacent Max Gap",
+            statement="Read a space-separated list of integers. Find and print the maximum absolute difference between any two directly adjacent numbers in the list.",
+            signature="stdin: space-separated integers -> stdout: one integer",
+            examples=[("10 15 12 20", "8")],
+        ),
+        tests=(
+            TestCase("10 15 12 20", "8"),
+            TestCase("5 5 5 5", "0"),
+            TestCase("-5 5 -5", "10"),
+            TestCase("100 1 50", "99"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 013",
+            title="Mirror Mirror",
+            statement="Read a single lowercase word. Print 'TRUE' if it is a palindrome (reads exactly the same forwards and backwards) and 'FALSE' otherwise.",
+            signature="stdin: one string -> stdout: 'TRUE' or 'FALSE'",
+            examples=[("racecar", "TRUE")],
+        ),
+        tests=(
+            TestCase("racecar", "TRUE"),
+            TestCase("python", "FALSE"),
+            TestCase("a", "TRUE"),
+            TestCase("radar", "TRUE"),
+            TestCase("hello", "FALSE"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 015",
+            title="Word Counter",
+            statement="Read a single line of text containing words separated by spaces. Print the total number of words in the line.",
+            signature="stdin: one string -> stdout: one integer",
+            examples=[("The quick brown fox", "4")],
+        ),
+        tests=(
+            TestCase("The quick brown fox", "4"),
+            TestCase("Hello", "1"),
+            TestCase("A B C D E F G", "7"),
+            TestCase("Coding is fun", "3"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 016",
+            title="Swap Ends",
+            statement="Read a single word. Swap its first and last characters and print the resulting word. If the word consists of only one character, print it unchanged.",
+            signature="stdin: one string -> stdout: one string",
+            examples=[("apple", "eppla")],
+        ),
+        tests=(
+            TestCase("apple", "eppla"),
+            TestCase("cat", "tac"),
+            TestCase("python", "nythop"),
+            TestCase("a", "a"),
+            TestCase("it", "ti"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="MED 003",
+            title="Second Largest",
+            statement="Read a space-separated list of at least two unique integers. Find and print the second largest integer in the list.",
+            signature="stdin: space-separated integers -> stdout: one integer",
+            examples=[("10 5 8 20", "10")],
+        ),
+        tests=(
+            TestCase("10 5 8 20", "10"),
+            TestCase("1 2 3 4", "3"),
+            TestCase("-5 -10 -1", "-5"),
+            TestCase("100 99", "99"),
+            TestCase("42 7 19 88 105", "88"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 017",
+            title="Valid Triangle",
+            statement="Read three space-separated integers representing the side lengths of a triangle. Print 'VALID' if they can form a valid triangle (the sum of any two sides must be strictly greater than the third), otherwise print 'INVALID'.",
+            signature="stdin: three space-separated integers -> stdout: 'VALID' or 'INVALID'",
+            examples=[("3 4 5", "VALID")],
+        ),
+        tests=(
+            TestCase("3 4 5", "VALID"),
+            TestCase("1 10 1", "INVALID"),
+            TestCase("5 5 5", "VALID"),
+            TestCase("2 2 4", "INVALID"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="MED 004",
+            title="Anagram Check",
+            statement="Read two space-separated words. Print 'YES' if they are exact anagrams of each other (contain the exact same letters in any order), otherwise print 'NO'.",
+            signature="stdin: two space-separated strings -> stdout: 'YES' or 'NO'",
+            examples=[("listen silent", "YES")],
+        ),
+        tests=(
+            TestCase("listen silent", "YES"),
+            TestCase("hello world", "NO"),
+            TestCase("rat tar", "YES"),
+            TestCase("apple pale", "NO"),
+            TestCase("dusty study", "YES"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 018",
+            title="Target Character Count",
+            statement="Read a single character and a word separated by a space. Print the number of times that specific character appears in the word. This is case-sensitive.",
+            signature="stdin: a character and a string separated by a space -> stdout: one integer",
+            examples=[("a banana", "3")],
+        ),
+        tests=(
+            TestCase("a banana", "3"),
+            TestCase("z zebra", "1"),
+            TestCase("x python", "0"),
+            TestCase("l hello", "2"),
+            TestCase("T Test", "1"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="MED 005",
+            title="Missing Number",
+            statement="Read an integer N on the first line. On the second line, read a space-separated list of N-1 unique integers ranging from 1 to N. Find and print the missing number.",
+            signature="stdin: integer N, newline, N-1 space-separated integers -> stdout: one integer",
+            examples=[("5\n1 2 4 5", "3")],
+        ),
+        tests=(
+            TestCase("5\n1 2 4 5", "3"),
+            TestCase("3\n3 1", "2"),
+            TestCase("10\n1 2 3 4 5 6 7 8 9", "10"),
+            TestCase("2\n2", "1"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="EZ 014",
+            title="Sum of Odds",
+            statement="Read a space-separated list of integers. Print the sum of all the odd integers in the list. If there are no odd integers, print 0.",
+            signature="stdin: space-separated integers -> stdout: one integer",
+            examples=[("1 2 3 4 5", "9")],
+        ),
+        tests=(
+            TestCase("1 2 3 4 5", "9"),
+            TestCase("2 4 6 8", "0"),
+            TestCase("-1 -2 -3", "-4"),
+            TestCase("10 11 12 13", "24"),
+        ),
+    ),
+    Entry(
+        problem=Problem(
+            id="MED 002",
+            title="Unique Char Counter",
+            statement="Read a single continuous string. Print the number of completely unique characters in the string (characters that appear exactly once).",
+            signature="stdin: one string -> stdout: one integer",
+            examples=[("swiss", "2")],
+        ),
+        tests=(
+            TestCase("swiss", "2"),
+            TestCase("aabbcc", "0"),
+            TestCase("abcdef", "6"),
+            TestCase("engineering", "3"),
         ),
     ),
     Entry(
