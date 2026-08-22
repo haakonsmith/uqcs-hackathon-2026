@@ -227,7 +227,13 @@ def _wrapper_argv(scratch: Path) -> list[str]:
             "--unshare-all",  # no network, no PID namespace sharing
             "--die-with-parent",
             "--ro-bind", "/", "/",
-            "--dev", "/dev",
+            # Individual device nodes rather than `--dev /dev`. `--dev` mounts
+            # a fresh devtmpfs and a devpts on top of it, which a rootless
+            # container is not allowed to do: nested, it fails outright with
+            # "Can't mount devpts". Binding the two nodes CPython actually
+            # wants costs nothing and works at any nesting depth.
+            "--dev-bind", "/dev/null", "/dev/null",
+            "--dev-bind", "/dev/urandom", "/dev/urandom",
             "--proc", "/proc",
             "--bind", str(scratch.resolve()), str(scratch.resolve()),
             "--chdir", str(scratch.resolve()),
