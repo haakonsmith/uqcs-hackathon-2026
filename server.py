@@ -1,9 +1,5 @@
 import asyncio
-import random
 
-import websockets
-
-from server import player
 from server.server import Server
 
 gameState = {}
