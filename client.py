@@ -24,8 +24,8 @@ part of the join.
 The board is larger than the terminal, so only a slice is on screen. Arrow
 keys and the mouse wheel scroll it (shift+wheel scrolls sideways), `+` and
 `-` zoom in and out by subsampling, the mouse inspects the cell under the
-cursor, `o` toggles the ownership overlay, `l` the legend of who is who,
-`q` quits.
+cursor, `o` switches the border between faint and bold, `l` toggles the legend
+of who is who and what to press, `q` quits.
 
 Every player's ground is outlined in their own colour, the local player in
 allied blue. The colours are chosen by each client for itself - see

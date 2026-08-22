@@ -85,6 +85,23 @@ class Viewport:
             self.y + screen_y * self.zoom,
         )
 
+    def to_screen(self, map_x: int, map_y: int) -> tuple[int, int]:
+        """Map cell to the screen position it is drawn at - inverse of `to_map`.
+
+        Lossy at zoom > 1, where a screen cell stands for a block of map cells:
+        every cell in a block answers the block's corner. Callers wanting to
+        know whether a cell is on screen at all should ask `shows` first, since
+        this happily extrapolates past the edges of the view.
+        """
+        return (
+            ((map_x - self.x) // self.zoom) * CELL_WIDTH,
+            (map_y - self.y) // self.zoom,
+        )
+
+    def shows(self, map_x: int, map_y: int) -> bool:
+        """Whether a map cell falls inside the slice currently on screen."""
+        return self.x <= map_x < self.x + self.span_x and self.y <= map_y < self.y + self.span_y
+
     def covers(self, screen_y: int) -> bool:
         """False below the map, so the status bar isn't mistaken for board."""
         return 0 <= screen_y < self.drawn_rows

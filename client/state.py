@@ -19,7 +19,7 @@ from client import hud
 from client.editor import Draft, NoEditor, edit
 from client.input import SCROLL_KEYS, KeyPump, wheel_delta
 from client.palette import Factions
-from client.render import Highlight, legend_panel, render
+from client.render import Highlight, garrison_panel, legend_panel, render
 from client.viewport import Viewport
 from protocol import (
     Acknowledged,
@@ -85,7 +85,7 @@ class App:
     world: terrain.WorldMap
     factions: Factions
     view: Viewport = field(default_factory=Viewport)
-    overlay: bool = False
+    bold_borders: bool = False
     legend: bool = True
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
@@ -198,7 +198,7 @@ class App:
             return
 
         if key == "o":
-            self.overlay = not self.overlay
+            self.bold_borders = not self.bold_borders
             self.dirty = True
         elif key == "l":
             self.legend = not self.legend
@@ -418,10 +418,13 @@ class App:
     def draw(self) -> None:
         term, view = self.term, self.view
         print(
-            term.home + render(term, self.world, view, self.overlay, self.highlights, self.factions),
+            term.home + render(term, self.world, view, self.bold_borders, self.highlights, self.factions),
             end="",
         )
-        # After the board, because it is laid over it.
+        # Both are laid over the board, so they follow it. Garrisons first:
+        # the legend is a solid box and should cover a count that lands under
+        # it rather than have digits printed across its rows.
+        print(garrison_panel(term, self.world, view, self.factions), end="")
         if self.legend:
             print(legend_panel(term, view, self.factions), end="")
 
