@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from uuid import UUID
 
+
 class Terrain(Enum):
     """A terrain type plus the gameplay rules and palette that ride on it."""
 
@@ -110,6 +111,22 @@ class WorldMap:
         return [t for t in self.territories if t.owner == player]
 
 
+# --------------------------------------------------------------------------
+# The same board, flattened for the wire
+#
+# `WorldMap` above is the shape the renderer and the game logic want: an object
+# per cell, sets of neighbours, `Terrain` members. None of that survives JSON,
+# so `World` below is the same board as parallel grids and plain lists, and the
+# two are converted with `World.from_map()` and `World.to_map()`. The pairing
+# is deliberate - `TerritoryState` is not a stray duplicate of `Territory`.
+# --------------------------------------------------------------------------
+
+# Heights are noise output, drawn as one of seven terrain bands and shown to
+# two decimals. Full float64 text triples the size of a board on the wire to
+# carry precision nothing reads.
+HEIGHT_DIGITS = 3
+
+
 @dataclass
 class TerrainInfo:
     """Palette and rules for one terrain type, so clients can render it."""
@@ -136,6 +153,7 @@ class TerritoryState:
     @property
     def size(self) -> int:
         return len(self.cells)
+
 
 @dataclass
 class World:
@@ -204,13 +222,13 @@ class World:
         return WorldMap(width=self.width, height=self.height, grid=grid, territories=territories)
 
     @classmethod
-    def from_map(cls, world_map: WorldMap, seed: int | None = None) -> 'World':
+    def from_map(cls, world_map: WorldMap, seed: int | None = None) -> "World":
         """Build serialisable state from a generated WorldMap."""
         return cls(
             width=world_map.width,
             height=world_map.height,
             seed=seed,
-            heights=[[cell.height for cell in row] for row in world_map.grid],
+            heights=[[round(cell.height, HEIGHT_DIGITS) for cell in row] for row in world_map.grid],
             terrain=[[cell.terrain.name for cell in row] for row in world_map.grid],
             territory_ids=[[cell.territory for cell in row] for row in world_map.grid],
             territories=[

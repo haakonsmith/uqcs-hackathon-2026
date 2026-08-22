@@ -1,7 +1,8 @@
-from uuid import UUID
 from dataclasses import dataclass
+from uuid import UUID
 
 Position = tuple[int, int]
+
 
 @dataclass
 class Player:

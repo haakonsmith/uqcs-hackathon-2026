@@ -33,19 +33,12 @@ class App:
     highlights: dict[int, Highlight] = field(default_factory=dict)
     dirty: bool = True
     running: bool = True
-    _size: tuple[int, int] = (0, 0)
 
     def fit(self) -> None:
         """Size the viewport to the terminal and refresh what follows from it."""
-        self._size = (self.term.width, self.term.height)
         self.view.fit(self.term.width, self.term.height, self.world)
         self.refresh_hover()
         self.dirty = True
-
-    def check_resize(self) -> None:
-        """A resize changes how much board fits, so refit before drawing."""
-        if (self.term.width, self.term.height) != self._size:
-            self.fit()
 
     def refresh_hover(self) -> None:
         """Recompute what the cursor points at.

@@ -5,8 +5,9 @@ readers on one terminal race for keystrokes, and the loser silently drops
 them. Every screen here - menu, settings, username prompt - is an
 `await events.get()` and a `match`, exactly like `play()`.
 
-The backdrop and the title change only on resize, so they are painted once
-and left alone; selecting a different button repaints the buttons only.
+The backdrop and the title change only on resize, so the escape sequences for
+them are built once and cached; selecting a different button repaints the
+buttons only.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import asyncio
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
+from typing import Literal, assert_never
 
 import blessed
 
@@ -56,11 +59,22 @@ WORLD_MAP = [
     "                                                                  ",
 ]
 
+
+@dataclass(frozen=True)
+class MenuItem:
+    """One button. `action` is what `_activate` dispatches on, `label` is only
+    ever drawn - renaming a button must not be able to change what it does."""
+
+    action: Literal["join", "settings", "exit"]
+    label: str
+    where: Literal["center_top", "center_bottom", "top_right"]
+
+
 # Order is arrow-key order; `where` is the corner of the screen each sits in.
 MENU_ITEMS = [
-    ("JOIN GAME", "center_top"),
-    ("SETTINGS", "top_right"),
-    ("EXIT", "center_bottom"),
+    MenuItem("join", "JOIN GAME", "center_top"),
+    MenuItem("settings", "SETTINGS", "top_right"),
+    MenuItem("exit", "EXIT", "center_bottom"),
 ]
 
 TITLE_TOP = 1
@@ -105,19 +119,35 @@ state = MenuState()
 
 def button_geometry(index: int, width: int, height: int) -> tuple[int, int, int]:
     """Top-left corner and drawn width of a button, in screen cells."""
-    name, where = MENU_ITEMS[index]
-    length = len(name) + 4
-    if where == "top_right":
+    item = MENU_ITEMS[index]
+    length = len(item.label) + 4
+    if item.where == "top_right":
         return max(0, width - length - 4), 7, length
-    if where == "center_top":
+    if item.where == "center_top":
         return max(0, (width - length) // 2), height // 2 + 2, length
     return max(0, (width - length) // 2), height // 2 + 4, length
 
 
 def _backdrop(term: blessed.Terminal) -> str:
     """Ocean, landmasses and title, sized to the terminal."""
-    width, height = term.width, term.height
-    output = [term.home]
+    return _render_backdrop(term, term.width, term.height)
+
+
+@lru_cache(maxsize=1)
+def _render_backdrop(term: blessed.Terminal, width: int, height: int) -> str:
+    """Draw the backdrop for one terminal size.
+
+    Cached because this is a per-cell colour call across the whole screen -
+    tens of milliseconds and tens of kilobytes - and it is redrawn under every
+    panel, including once per keystroke while a prompt is open. The size is in
+    the key rather than read off `term`, so a resize misses and redraws.
+
+    One entry is enough: only the current size is ever asked for, and a resize
+    should evict the old one rather than hold a screen's worth of string.
+    """
+    # Annotated, because `term.home` is a blessed string subclass and an
+    # inferred list of it rejects the plain strings appended below.
+    output: list[str] = [term.home]
 
     map_height = len(WORLD_MAP)
     map_width = len(WORLD_MAP[0]) * 2
@@ -156,14 +186,14 @@ def _buttons(term: blessed.Terminal) -> str:
     width, height = term.width, term.height
     output: list[str] = []
 
-    for index, (name, _) in enumerate(MENU_ITEMS):
+    for index, item in enumerate(MENU_ITEMS):
         x, y, _length = button_geometry(index, width, height)
         if y >= height:
             continue
         if index == state.selected:
-            output.append(term.move_xy(x, y) + term.bold_black_on_white(f"[>{name}<]"))
+            output.append(term.move_xy(x, y) + term.bold_black_on_white(f"[>{item.label}<]"))
         else:
-            output.append(term.move_xy(x, y) + term.bold_white_on_blue(f"[ {name} ]"))
+            output.append(term.move_xy(x, y) + term.bold_white_on_blue(f"[ {item.label} ]"))
 
     footer = f" {state.username} @ {state.address}   arrows/mouse select  [enter] choose  [q] quit "
     output.append(term.move_xy(0, height - 1) + term.bold_white_on_blue(footer[:width].ljust(width)))
@@ -171,7 +201,7 @@ def _buttons(term: blessed.Terminal) -> str:
 
 
 def _paint(term: blessed.Terminal, backdrop: bool) -> None:
-    print(_backdrop(term) + _buttons(term) if backdrop else _buttons(term), end="")
+    print((_backdrop(term) + _buttons(term)) if backdrop else _buttons(term), end="")
     _ = sys.stdout.flush()
 
 
@@ -270,20 +300,24 @@ async def prompt(
 
 async def _activate(term: blessed.Terminal, events: asyncio.Queue[AppEvent]) -> MenuChoice | None:
     """Run the selected button. None means stay on the menu."""
-    match MENU_ITEMS[state.selected][0]:
-        case "JOIN GAME":
+    match MENU_ITEMS[state.selected].action:
+        case "join":
             username = await prompt(term, events, "=== ENTER YOUR USERNAME ===", state.username)
             if username is None:
                 return None
             state.username = username or DEFAULT_USERNAME
             return JoinGame(address=state.address, username=state.username)
-        case "SETTINGS":
+        case "settings":
             address = await prompt(term, events, "=== SERVER ADDRESS ===", state.address)
             if address:
                 state.address = address
             return None
-        case _:
+        case "exit":
             return Quit()
+        case unknown:
+            # Exhaustive over the Literal, so a new action that nobody wired up
+            # is a crash here rather than a button that silently quits.
+            assert_never(unknown)
 
 
 def _hit(width: int, height: int, x: int, y: int) -> int | None:

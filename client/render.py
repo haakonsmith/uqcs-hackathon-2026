@@ -78,15 +78,3 @@ def render(
 def status(world: terrain.WorldMap, view: Viewport, hover: str) -> str:
     position = f"[{view.x},{view.y}] {view.span_x}x{view.span_y} of {world.width}x{world.height} @{view.zoom}x"
     return f" {position}  {hover}   arrows/wheel scroll  +/- zoom  [o]verlay  [q]uit "
-
-
-def describe(world: terrain.WorldMap) -> None:
-    """Poke at the board the way game logic would. Printed on exit."""
-    home = world.territories[0]
-    print(f"territory {home.id} covers {home.size} cells and holds {home.soldiers} soldiers")
-    print(f"  borders by land: {sorted(home.land_neighbours)}")
-    print(f"  reachable by sea: {sorted(home.sea_neighbours)}")
-
-    # Terrain carries the movement rules, so pathfinding reads straight off it.
-    blocked = sum(1 for x, y in home.cells if not world.cell(x, y).terrain.passable)
-    print(f"  {blocked} of its cells are impassable (water or mountain)")
