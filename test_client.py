@@ -33,7 +33,7 @@ async def test_client() -> None:
         while not conn.events.empty():
             print(f"event -> {conn.events.get_nowait()!r}")
 
-        reader.cancel()
+        _ = reader.cancel()
 
 
 if __name__ == "__main__":

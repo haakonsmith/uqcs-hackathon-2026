@@ -40,9 +40,24 @@ def response_types(cls: type) -> tuple[type, ...]:
     if cached is not None:
         return cached
 
-    (base,) = (b for b in types.get_original_bases(cls) if typing.get_origin(b) is Request)
-    (declared,) = typing.get_args(base)
+    # The introspection APIs are typed as tuple[Any, ...] because they can hand
+    # back anything writable in a type expression. Widening to object at the
+    # boundary keeps that Any from leaking, and the isinstance filter below is
+    # what actually earns the tuple[type, ...] return.
+    bases: tuple[object, ...] = types.get_original_bases(cls)
+    base = next((b for b in bases if typing.get_origin(b) is Request), None)
+    if base is None:
+        raise TypeError(f"{cls.__name__} does not subclass Request[...]")
+
+    declared: tuple[object, ...] = typing.get_args(base)
+    if len(declared) != 1:
+        raise TypeError(f"{cls.__name__} must name exactly one response type")
+
     # A union yields its members; a lone type yields nothing, so use it as-is.
-    resolved = typing.get_args(declared) or (declared,)
+    members: tuple[object, ...] = typing.get_args(declared[0]) or declared
+    resolved = tuple(member for member in members if isinstance(member, type))
+    if len(resolved) != len(members):
+        raise TypeError(f"{cls.__name__} declares a response that is not a class")
+
     _RESPONSE_TYPES[cls] = resolved
     return resolved

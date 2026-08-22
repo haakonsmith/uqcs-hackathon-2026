@@ -31,7 +31,7 @@ class Connection:
     """Wraps a websocket, matching responses to the requests that asked for them."""
 
     def __init__(self, ws: Socket) -> None:
-        self._ws = ws
+        self._ws: Socket = ws
         self._pending: dict[str, asyncio.Future[ServerResponse]] = {}
         self.events: asyncio.Queue[ServerEvent] = asyncio.Queue()
 

@@ -100,7 +100,7 @@ class Server:
             self.connections.discard(websocket)
             player_id = self.sessions.pop(websocket, None)
             if player_id is not None:
-                self.players.pop(player_id, None)
+                _ = self.players.pop(player_id, None)
                 await self.broadcast(PlayerLeft(player_id=str(player_id)))
 
     async def run(self) -> None:
