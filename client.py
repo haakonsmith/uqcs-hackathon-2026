@@ -10,7 +10,9 @@ The menu is arrow keys or the mouse; JOIN GAME asks for a username and
 connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
 
 During a round, `s` drops out to $EDITOR to write a solution and submits it on
-exit, `n` picks a territory, `space`/`p` place troops, `m` orders a march, `c`
+exit - or, where there is no terminal editor to drop out to, asks the OS which
+application to open the draft with and submits when it is saved. `n` picks a
+territory, `space`/`p` place troops, `m` orders a march, `c`
 clears both, `f` says you are finished with the phase and `tab` shows the
 scoreboard.
 

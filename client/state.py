@@ -346,6 +346,9 @@ class App:
             self.invalidate()
             self.fit()
 
+        if code is None:
+            self._say("nothing submitted - the draft was never saved")
+            return
         if not code.strip():
             self._say("nothing submitted - the draft was empty")
             return
