@@ -221,6 +221,13 @@ class BattleReport:
     The biggest stack takes the ground and loses as many troops as the next
     biggest had. A tie at the top wipes both out and leaves the territory
     unowned, which is the only outcome where nobody walks away with it.
+
+    `defender` is who held the ground before any of this, which `stacks` cannot
+    say: the sitting garrison is merged into its owner's stack and sorted in
+    among the attackers, so by the time a report is read there is no telling
+    which side was already there. Without it the only honest thing a client can
+    report is who holds the territory now - never who lost it, which is the
+    half a player actually feels. None means it was nobody's.
     """
 
     territory: int
@@ -228,9 +235,18 @@ class BattleReport:
     winner: str | None = None
     winner_name: str = ""
     survivors: int = 0
+    defender: str | None = None
+    defender_name: str = "nobody"
+
+    @property
+    def held(self) -> bool:
+        """True when the side that already had it kept it."""
+        return self.winner is not None and self.winner == self.defender
 
     def summary(self) -> str:
         sides = ", ".join(f"{s.name} {s.troops}" for s in self.stacks)
         if self.winner is None:
             return f"territory {self.territory}: {sides} - wiped out, nobody holds it"
-        return f"territory {self.territory}: {sides} - {self.winner_name} holds it with {self.survivors}"
+        if self.held:
+            return f"territory {self.territory}: {sides} - {self.winner_name} held it with {self.survivors}"
+        return f"territory {self.territory}: {sides} - {self.winner_name} took it from {self.defender_name}, {self.survivors} left"

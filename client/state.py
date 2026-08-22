@@ -148,6 +148,11 @@ class App:
     # can be refused. Drawn as the `(+n)` beside a garrison, and emptied when
     # the phase carries it out.
     placements: dict[int, int] = field(default_factory=dict)
+    # Territories the last resolution fought over, lit on the board until the
+    # next commanding phase opens. A popup can name where a battle was, but
+    # only the board can show it, and the popup is gone the moment a key is
+    # pressed - which is well before anybody has found the place on the map.
+    battle_marks: set[int] = field(default_factory=set)
 
     def tick(self) -> None:
         """A second passed: only the countdown on the phase bar changed."""
@@ -193,6 +198,10 @@ class App:
         board moves under a stationary mouse, so what it points at changes.
         """
         self.highlights = {}
+        # Under the pick rather than over it: the pick is a thing the player is
+        # doing now, and a mark is a thing that already happened.
+        for territory_id in self.battle_marks:
+            self.highlights[territory_id] = (200, 110, 45)
         if self.selected is not None:
             self.highlights[self.selected] = (245, 245, 245)
 
@@ -655,7 +664,16 @@ class App:
                     # a stale verdict cannot sit over the new instructions.
                     self.message = ""
                     self._forget_plan()
+                    if round_state.phase == "commanding":
+                        # Last round's fights stop being news the moment there
+                        # is a decision to make, and a board still lit up with
+                        # them is a board that is hard to plan on. They survive
+                        # the submitting phase, which is the whole point: a
+                        # player looks up from their editor and can still see
+                        # what happened to them.
+                        self.battle_marks = set()
                 self.round = round_state
+                self.refresh_hover()
                 self.dirty = True
             case BoardChanged(updates=updates):
                 for update in updates:
@@ -675,7 +693,9 @@ class App:
                 # Newer than any verdict from this round, so [v] should
                 # bring this back rather than the submission before it.
                 self.last_verdict = None
-                self._show_popup(hud.battles_popup(battles, dropped))
+                self.battle_marks = {b.territory for b in battles} | {d.territory for d in dropped}
+                self.refresh_hover()
+                self._show_popup(hud.battles_popup(battles, dropped, self.world, self.me))
                 self._say(f"{len(battles)} battles" if battles else "troops landed")
             case GameOver(name=name, winner=winner):
                 self._show_popup(hud.game_over_popup(name, winner))

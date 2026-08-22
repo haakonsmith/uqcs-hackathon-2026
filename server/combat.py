@@ -143,6 +143,9 @@ def _settle(
     names: dict[UUID, str],
 ) -> BattleReport | None:
     """Work out who is left standing in one territory."""
+    # Read before anything below reassigns it: this is the only moment the
+    # board still knows who the ground belonged to going in.
+    defender = territory.owner
     stacks: dict[UUID | None, int] = defaultdict(int)
     if territory.soldiers > 0 or territory.owner is not None:
         stacks[territory.owner] += territory.soldiers
@@ -164,11 +167,19 @@ def _settle(
         Stack(owner=str(owner) if owner else None, name=_name(owner, names), troops=troops) for owner, troops in ranked
     ]
 
+    held_by = str(defender) if defender is not None else None
     if top == second:
         # Nobody is left to hold it, so it goes back to being nobody's.
         territory.owner = None
         territory.soldiers = 0
-        return BattleReport(territory=territory.id, stacks=report_stacks, winner=None, survivors=0)
+        return BattleReport(
+            territory=territory.id,
+            stacks=report_stacks,
+            winner=None,
+            survivors=0,
+            defender=held_by,
+            defender_name=_name(defender, names),
+        )
 
     territory.owner = top_owner
     territory.soldiers = top - second
@@ -178,6 +189,8 @@ def _settle(
         winner=str(top_owner) if top_owner else None,
         winner_name=_name(top_owner, names),
         survivors=territory.soldiers,
+        defender=held_by,
+        defender_name=_name(defender, names),
     )
 
 
