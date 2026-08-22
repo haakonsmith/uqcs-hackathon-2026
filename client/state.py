@@ -56,7 +56,14 @@ def _starter(round_state: RoundState | None) -> str:
     lines = [f"# {problem.title}", "#", *(f"# {line}" for line in _wrap(problem.statement)), f"# {problem.signature}"]
     for given, wanted in problem.examples:
         lines.append(f"#   {given!r} -> {wanted!r}")
-    lines += ["", "# While the judge is a placeholder it reads markers, not code:", "#   # solved      all tests pass", "#   # passes N    exactly N pass", ""]
+    lines += [
+        "#",
+        "# Read stdin, write stdout. Your code runs on the server against",
+        "# hidden test cases, in a sandbox with no network and a few seconds",
+        "# of CPU. Only whether each case matched comes back, never what was",
+        "# expected.",
+        "",
+    ]
     return "\n".join(lines)
 
 

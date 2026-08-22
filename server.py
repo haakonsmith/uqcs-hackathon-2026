@@ -3,6 +3,7 @@
     python server.py                          # localhost:8888
     python server.py --host 0.0.0.0           # reachable from the network
     python server.py --port 9000 -v           # another port, every frame logged
+    python server.py --judge placeholder      # score without executing anything
 
 Logging is configured here rather than in `server/server.py`, because a
 library that configures the root logger on import decides the format for
@@ -16,6 +17,7 @@ import argparse
 import asyncio
 import logging
 
+from server.judge import Judge, PlaceholderJudge, SubprocessJudge
 from server.server import DEFAULT_HOST, DEFAULT_PORT, Server
 
 logger = logging.getLogger("Server")
@@ -34,6 +36,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="interface to bind; 0.0.0.0 for every interface",
     )
     parser.add_argument("--port", type=port_number, default=DEFAULT_PORT, help="port to listen on")
+    parser.add_argument(
+        "--judge",
+        choices=("subprocess", "placeholder"),
+        default="subprocess",
+        help="subprocess runs submitted code in a sandbox; placeholder executes nothing and scores off markers",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="log every frame, and websockets' own output")
     return parser.parse_args(argv)
 
@@ -59,8 +67,12 @@ def configure_logging(verbose: bool) -> None:
     logging.getLogger("websockets").setLevel(logging.DEBUG if verbose else logging.WARNING)
 
 
+def build_judge(name: str) -> Judge:
+    return SubprocessJudge() if name == "subprocess" else PlaceholderJudge()
+
+
 async def main(args: argparse.Namespace) -> None:
-    await Server().run(host=args.host, port=args.port)
+    await Server(judge=build_judge(args.judge)).run(host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
