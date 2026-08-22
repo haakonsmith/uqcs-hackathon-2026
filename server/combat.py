@@ -1,24 +1,19 @@
 """A phase of play, and what happens where it collides.
 
-Placements and marching orders are collected through the phase and carried out
-in one pass at the end, which is what lets two players march into the same
-territory on the same turn. Applying each as it arrived would make the game
-about who typed faster.
+Placements are collected through the phase and carried out in one pass at the
+end, which is what lets two players commit to the same territory on the same
+turn. Applying each as it arrived would make the game about who typed faster.
 
-The pass is placements, then marches. In that order because they were separate
-phases in that order, and the strategy depended on it: reinforcements a player
-put down were theirs to attack with the same turn, and folding the two phases
-into one should not have taken that away.
-
-Troops go on your own ground or on ground touching it. On your own they join
-the garrison; next door they are an assault, and arrive the same way a march
-does - so a player with nothing worth marching can still push a frontier.
+Placing is the only way troops reach the board, and the only way ground changes
+hands. Troops go on your own territories or on ones touching them: on your own
+they join the garrison, next door they are an assault. A player therefore
+spends each round's award at whichever frontier they want to push, and a
+garrison already standing stays where it is.
 
 Resolution is a headcount, not a dice roll:
 
-- every order leaves its source, whether or not it arrives anywhere useful
 - arrivals are bucketed per territory, per owner, and the garrison already
-  standing there - reinforcements included - is just another stack
+  standing there is just another stack
 - one owner present: they hold the ground with everything they brought
 - several: the biggest stack takes it and loses as many troops as the next
   biggest had, so winning a close fight costs nearly everything
@@ -35,7 +30,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from protocol.rounds import BattleReport, DroppedOrder, MoveOrder, Placement, Stack, troops_to_send
+from protocol.rounds import BattleReport, DroppedOrder, Placement, Stack
 from protocol.terrain import Territory, WorldMap
 
 logger = logging.getLogger("Combat")
@@ -47,33 +42,23 @@ class IllegalMove(Exception):
 
 @dataclass
 class Plan:
-    """Everything committed this phase, per player, in the order it was given.
+    """Everything a player has committed this phase, not yet on the board.
 
-    Placements live here beside the orders rather than on the board, because
-    they are the same kind of thing: a promise nobody else can see until the
-    phase ends. Keeping them together is also the only way to say what a
-    territory has left to send, which is its garrison plus what has been placed
-    on it less what has been ordered out.
+    Placements live here rather than on the board because until the phase ends
+    they are a promise nobody else can see, and one the player can still tear
+    up. Only when the phase resolves do they become troops.
     """
 
-    orders: dict[UUID, list[MoveOrder]] = field(default_factory=lambda: defaultdict(list))
     # player -> territory -> troops promised to it, summed rather than listed:
     # placing twice on one territory is one reinforcement, not two.
     placements: dict[UUID, dict[int, int]] = field(default_factory=lambda: defaultdict(lambda: defaultdict(int)))
-
-    def add(self, player: UUID, order: MoveOrder) -> None:
-        self.orders[player].append(order)
 
     def place(self, player: UUID, territory: int, count: int) -> None:
         self.placements[player][territory] += count
 
     def clear(self, player: UUID) -> int:
         """Forget a player's plan. Returns the troops that go back into hand."""
-        _ = self.orders.pop(player, None)
         return sum(self.placements.pop(player, {}).values())
-
-    def orders_for(self, player: UUID) -> list[MoveOrder]:
-        return list(self.orders.get(player, ()))
 
     def placements_for(self, player: UUID) -> list[Placement]:
         # Sorted by territory so a client redrawing the plan does not have the
@@ -85,50 +70,17 @@ class Plan:
         return self.placements.get(player, {}).get(territory, 0)
 
     def __bool__(self) -> bool:
-        return any(self.orders.values()) or any(self.placements.values())
+        return any(self.placements.values())
 
 
 @dataclass(frozen=True)
 class Resolution:
     battles: list[BattleReport]
     touched: tuple[int, ...]
-    # Orders and placements the phase could not carry out. Separate from
-    # `battles` because they change nothing on the board, so a client with only
-    # the delta and the battle list has no way to show that they happened.
+    # Placements the phase could not carry out. Separate from `battles` because
+    # they change nothing on the board, so a client with only the delta and the
+    # battle list has no way to show that they happened.
     dropped: list[DroppedOrder] = field(default_factory=list)
-
-
-def sendable(board: WorldMap, plan: Plan, player: UUID, territory_id: int) -> int:
-    """Troops a territory can still be ordered to march out.
-
-    The sum itself is `troops_to_send`, shared with the client so the two ends
-    cannot disagree about which orders are legal. This is only the half that
-    knows where a board and a plan keep the three numbers it wants.
-    """
-    territory = _territory(board, territory_id)
-    return troops_to_send(
-        garrison=territory.soldiers,
-        placed=plan.placed(player, territory_id),
-        orders=plan.orders.get(player, ()),
-        source=territory_id,
-    )
-
-
-def validate(board: WorldMap, plan: Plan, player: UUID, order: MoveOrder) -> None:
-    """Check one order against the board and what is already promised."""
-    source = _territory(board, order.source)
-    _ = _territory(board, order.target)
-
-    if source.owner != player:
-        raise IllegalMove(f"territory {order.source} is not yours")
-    if order.target not in source.neighbours:
-        raise IllegalMove(f"territory {order.target} does not border {order.source}")
-    if order.count < 1:
-        raise IllegalMove("move at least one soldier")
-
-    spare = sendable(board, plan, player, order.source)
-    if order.count > spare:
-        raise IllegalMove(f"territory {order.source} has {spare} left to send, not {order.count}")
 
 
 def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int) -> None:
@@ -149,21 +101,20 @@ def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int
 
 
 def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
-    """Carry out a whole phase at once: troops land, then everybody marches."""
+    """Carry out a whole phase at once: every placement lands together."""
     touched: set[int] = set()
     dropped: list[DroppedOrder] = []
     # territory -> owner -> troops arriving
     arrivals: dict[int, dict[UUID, int]] = defaultdict(lambda: defaultdict(int))
 
     def drop(player: UUID, territory: int, count: int, reason: str) -> None:
-        """Record troops the phase could not move, and say who lost them."""
+        """Record troops the phase could not land, and say who lost them."""
         logger.info("dropping %d of %s at %d: %s", count, _name(player, names), territory, reason)
         dropped.append(DroppedOrder(player=str(player), name=_name(player, names), territory=territory, count=count, reason=reason))
 
-    # Reinforcements first, so they are part of the garrison the orders below
-    # march out of and fight with. Troops placed on somebody else's ground
-    # never garrison it: they arrive on it, and are settled with everything
-    # else that lands there.
+    # Troops placed on your own ground join its garrison outright. Placed on
+    # somebody else's they never garrison it: they arrive on it, and are
+    # settled against whatever else lands there.
     for player, placements in plan.placements.items():
         for territory_id, count in placements.items():
             territory = board.territories[territory_id]
@@ -175,21 +126,6 @@ def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
                 drop(player, territory_id, count, "out of reach when the phase ended")
                 continue
             touched.add(territory_id)
-
-    for player, player_orders in plan.orders.items():
-        for order in player_orders:
-            source = board.territories[order.source]
-            # An order given before the source was lost is simply not carried
-            # out: those troops were captured with the ground they stood on.
-            if source.owner != player:
-                drop(player, order.source, order.count, "no longer yours when the phase ended")
-                continue
-            if source.soldiers < order.count:
-                drop(player, order.source, order.count, f"only {source.soldiers} were left to send")
-                continue
-            source.soldiers -= order.count
-            arrivals[order.target][player] += order.count
-            touched.add(order.source)
 
     battles: list[BattleReport] = []
     for territory_id, incoming in arrivals.items():

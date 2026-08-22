@@ -30,7 +30,6 @@ from protocol.actions import (
     Judged,
     LobbyChanged,
     MovesResolved,
-    MoveTroops,
     PlaceTroops,
     Planned,
     ReadySet,
@@ -58,7 +57,6 @@ from protocol.rounds import (
     CaseResult,
     CaseStatus,
     DroppedOrder,
-    MoveOrder,
     Phase,
     Placement,
     PlayerRound,
@@ -66,7 +64,6 @@ from protocol.rounds import (
     RoundState,
     TerritoryUpdate,
     Verdict,
-    troops_to_send,
 )
 from protocol.terrain import TerrainInfo, TerritoryState, World
 
@@ -95,8 +92,6 @@ __all__ = [
     "Lobby",
     "LobbyChanged",
     "LobbyPlayer",
-    "MoveOrder",
-    "MoveTroops",
     "MovesResolved",
     "Phase",
     "PlaceTroops",
@@ -124,5 +119,4 @@ __all__ = [
     "dump_frame",
     "parse_frame",
     "response_types",
-    "troops_to_send",
 ]

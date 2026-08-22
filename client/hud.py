@@ -16,7 +16,7 @@ from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, Roun
 # a terminal with no mouse reporting. The full list lives behind [?].
 KEYS: dict[Phase, str] = {
     "submitting": "[s]ubmit  [v] last panel  [f]inished",
-    "commanding": "[v] last panel  click to place  [m] march from here  [1-9] how many  [p] all  [c]lear  [f]inished",
+    "commanding": "[v] last panel  click to place  [1-9] how many  [p] all  [c]lear  [f]inished",
 }
 
 # Every binding, grouped, for the [?] panel. Phase-specific first, because
@@ -31,11 +31,9 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("click", "reinforce your ground, or assault ground beside it"),
         ("[space]", "place on the picked territory"),
         ("[p]", "place every troop you have left"),
-        ("[m]", "march from here, then click a neighbour; [m] again calls it off"),
-        ("[1-9]", "how many a place or a march moves"),
+        ("[1-9]", "how many troops a placement puts down"),
         ("[n] [N]", "cycle your territories, then neighbours"),
         ("[c]", "clear everything you have planned"),
-        ("[esc]", "forget the source you picked"),
         ("[f]", "finished with this phase"),
     ],
 }
@@ -60,13 +58,13 @@ RULES_HELP: list[str] = [
     "plus up to 5 for how much of the problem you got, plus",
     "3 for being first to solve it.",
     "",
-    "Place troops and order marches in the same phase. Both",
-    "are secret until it ends, and shown to you as (+n) on",
-    "a garrison until then.",
+    "Spend them on your own ground or on ground touching it:",
+    "the first reinforces, the second assaults. Placements",
+    "are secret until the phase ends, and shown to you as",
+    "(+n) on a garrison until then.",
     "",
-    "When the phase ends, troops land first - so what you",
-    "placed can march the same turn. Where marches meet, the",
-    "biggest stack takes the territory and loses as many",
+    "Then everything lands at once. Where two players meet,",
+    "the biggest stack takes the territory and loses as many",
     "troops as the second biggest. A tie wipes both out and",
     "leaves the ground unowned.",
 ]
@@ -156,8 +154,8 @@ def _doing(round_state: RoundState, mine: PlayerRound | None) -> str:
         return f"solve {title}"
 
     if mine is not None and mine.troops:
-        return f"place {mine.troops} troops and order marches"
-    return "order marches"
+        return f"place {mine.troops} troops"
+    return "waiting on the others"
 
 
 def _blocking(round_state: RoundState, me: str) -> str:
@@ -172,8 +170,8 @@ def _blocking(round_state: RoundState, me: str) -> str:
     return f"waiting on {len(others)} players"
 
 
-def key_line(round_state: RoundState | None, selected: int | None) -> str:
-    """The keys that do something right now, and any pending selection."""
+def key_line(round_state: RoundState | None) -> str:
+    """The keys that do something right now."""
     # Only what this phase answers, plus the way to everything else. The rest
     # used to be listed here and ran to 200 characters, which no terminal
     # showed in full and which the [?] panel now covers properly.
@@ -181,12 +179,7 @@ def key_line(round_state: RoundState | None, selected: int | None) -> str:
     if round_state is None:
         return f"  {common} "
 
-    keys = KEYS.get(round_state.phase, "")
-    if selected is not None:
-        # Mid-order the phase keys are the wrong list: what matters is that an
-        # order is half-made, where it starts, and the two ways out of it.
-        return f"  marching from {selected} - click a neighbour  [esc] give up  [m] on {selected} calls it off   {common} "
-    return f"  {keys}   {common} "
+    return f"  {KEYS.get(round_state.phase, '')}   {common} "
 
 
 # Drawn instead of colour, so the result reads the same on a terminal that
@@ -234,12 +227,13 @@ def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> 
 
 
 def battles_popup(battles: list[BattleReport], dropped: list[DroppedOrder] | None = None) -> list[str]:
-    """What the marching orders did, once they all landed at once.
+    """What the phase did, once every placement landed at once.
 
-    Orders that could not be carried out are listed under the battles rather
-    than left out. They move nothing, so they reach the board delta as an
-    absence: troops a player watched themselves commit that are simply not
-    there next round, with no way to tell a lost order from a lost fight.
+    Placements that could not be carried out are listed under the battles
+    rather than left out. They put nothing on the board, so they reach the
+    delta as an absence: troops a player watched themselves commit that are
+    simply not there next round, with no way to tell a lost placement from a
+    lost fight.
     """
     dropped = dropped or []
     if not battles and not dropped:

@@ -19,7 +19,7 @@ from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
 from protocol.lobby import Lobby
-from protocol.rounds import BattleReport, DroppedOrder, MoveOrder, Placement, RoundState, TerritoryUpdate, Verdict
+from protocol.rounds import BattleReport, DroppedOrder, Placement, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
 
 # --------------------------------------------------------------------------
@@ -67,16 +67,11 @@ class Judged:
 class Planned:
     """This player's plan for the phase, as it stands after being added to.
 
-    One answer for placing and for marching, because they spend the same
-    troops: a march can send soldiers placed this phase, so a client told about
-    one without the other would show a garrison it cannot account for.
-
     Sent only to the player who made it, and never broadcast - a plan the room
     can see is a plan nobody can be surprised by.
     """
 
     placements: list[Placement]
-    orders: list[MoveOrder]
     # Troops earned this round and not yet promised to anywhere.
     remaining: int
     round: RoundState
@@ -159,22 +154,8 @@ class PlaceTroops(Request[Planned | Refused]):
 
 
 @dataclass(frozen=True)
-class MoveTroops(Request[Planned | Refused]):
-    """Order troops to a neighbouring territory, friendly or not.
-
-    Queued rather than applied: everybody's orders resolve together when the
-    phase ends, so two players can march into the same place at once.
-    """
-
-    source: int
-    target: int
-    count: int
-    action: Literal["move_troops"] = "move_troops"
-
-
-@dataclass(frozen=True)
 class CancelPlan(Request[Planned | Refused]):
-    """Tear up this player's plan for the phase, placements and orders alike.
+    """Tear up this player's plan for the phase.
 
     Placed troops go back into hand rather than onto the board: nothing has
     happened yet, so there is nothing to take back off it.
@@ -259,8 +240,8 @@ class GameOver:
 class MovesResolved:
     """The phase ended and every order was carried out at once.
 
-    Only contested territories get a report; a march into empty ground of your
-    own is just a board delta. `dropped` is the opposite: orders and placements
+    Only contested territories get a report; troops landing on empty ground of
+    your own is just a board delta. `dropped` is the opposite: orders and placements
     that never happened, which leave no delta at all and so have nowhere else
     to be told.
     """
@@ -278,7 +259,7 @@ class MovesResolved:
 # switch on the tag instead of trying each member in turn, which is both faster
 # and gives an error naming the tag rather than every failed candidate.
 ClientRequest = Annotated[
-    Join | SetReady | SubmitSolution | PlaceTroops | MoveTroops | CancelPlan | FinishPhase | Echo,
+    Join | SetReady | SubmitSolution | PlaceTroops | CancelPlan | FinishPhase | Echo,
     Field(discriminator="action"),
 ]
 ServerResponse = Annotated[

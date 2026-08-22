@@ -209,8 +209,14 @@ def compare(case: TestCase, output: str) -> bool:
 
 
 def _normalise(text: str) -> list[str]:
-    """Output as comparable lines: no trailing space, no trailing blanks."""
-    lines = [line.rstrip() for line in text.splitlines()]
+    """Output as comparable lines: no surrounding blank, no trailing space.
+
+    The outer `strip` is what the whole-blob comparison used to do on its own,
+    kept so nothing that passed before starts failing. Indentation part-way
+    through an answer still counts - a solution printing a shape is printing
+    the spaces on purpose.
+    """
+    lines = [line.rstrip() for line in text.strip().splitlines()]
     while lines and not lines[-1]:
         lines.pop()
     return lines

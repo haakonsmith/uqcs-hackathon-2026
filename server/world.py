@@ -735,8 +735,8 @@ def _link_sea_routes(
     joined however far apart they are, or somebody spends the game unable to
     reach anybody. The second is that the board is worth playing on. A single
     landmass used to get no lanes at all, because the old rule only ever
-    bridged *between* landmasses - so a bay you could see across took a march
-    the long way round, and navies did not exist.
+    bridged *between* landmasses - so a bay you could see across was no border
+    at all, and had to be walked around, and navies did not exist.
 
     Lanes run coast to coast rather than centre to centre, are only drawn
     where the line between them stays at sea, and each port takes at most

@@ -11,21 +11,20 @@ everybody else rather than ending the phase from under them.
 
 `commanding` is a player's whole turn on the board: the troops those solutions
 earned go onto owned territories or onto ground bordering them - reinforcing
-the first, assaulting the second - and marches are ordered out of what is
-owned. It ends early once every player says they are done, so a room that is
-ready does not sit watching a clock.
+the first, assaulting the second. It ends early once every player says they are
+done, so a room that is ready does not sit watching a clock.
 
-Placing and marching were phases of their own, in that order, and are one
-phase now: the second was only ever the first with the troops already down, so
-a player who had spent their allocation sat through a second clock to move it.
-There is one round of allocation per round of play.
+Placing is the only way troops reach the board, and the only way ground changes
+hands. Troops already standing stay where they are, so each round is a decision
+about where to spend that round's award rather than about redeploying what is
+already down. There is one round of allocation per round of play.
 
-Neither a placement nor an order happens when it is asked for. Both are held as
-a plan and carried out together when the phase ends, placements first so troops
-placed this phase can march out of it. That is what makes two players able to
-march into the same territory on the same turn, and it means nobody sees
-anybody else's reinforcements coming: until the phase ends a placement shows
-only on its own player's screen, as a `(+n)` beside the garrison it will join.
+A placement does not happen when it is asked for. It is held as a plan and
+carried out with everybody else's when the phase ends, which is what makes two
+players able to commit to the same territory on the same turn, and it means
+nobody sees anybody else's reinforcements coming: until the phase ends a
+placement shows only on its own player's screen, as a `(+n)` beside the
+garrison it will join.
 
 Deadlines travel as `seconds_left` rather than as timestamps: the two ends have
 no common clock, and a countdown that disagrees with the server by the client's
@@ -34,14 +33,13 @@ clock skew is worse than one that drifts by the network latency.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal
 
 # How long a phase runs before the server moves everyone on regardless.
 SUBMIT_SECONDS = 60.0
-# One phase where there used to be two, so shorter than the pair it replaces
-# but longer than either: placing and marching are now planned side by side.
+# Long enough to look at the board and decide where the round's troops go,
+# which is the only decision this phase asks for.
 COMMAND_SECONDS = 150.0
 
 # Once somebody solves the problem, how long everyone else gets to finish.
@@ -179,31 +177,6 @@ class TerritoryUpdate:
 
 
 @dataclass(frozen=True)
-class MoveOrder:
-    """Troops ordered from one territory to a neighbouring one."""
-
-    source: int
-    target: int
-    count: int
-
-
-def troops_to_send(garrison: int, placed: int, orders: Iterable[MoveOrder], source: int) -> int:
-    """Troops a territory can still be ordered to march out.
-
-    The garrison standing on it, plus anything placed on it this phase, less
-    everything already ordered away: reinforcements can attack the turn they
-    arrive, and no soldier can be sent twice.
-
-    Here rather than on either side of the wire because both ends need the
-    same number. The server refuses an order that overdraws it; the client
-    clamps to it before asking. Two copies of this sum drifting apart shows up
-    as a client offering marches the server then rejects, which is the one
-    failure a player reads as the game being broken.
-    """
-    return garrison + placed - sum(order.count for order in orders if order.source == source)
-
-
-@dataclass(frozen=True)
 class Placement:
     """Troops of this round's award promised to a territory already owned.
 
@@ -229,9 +202,9 @@ class DroppedOrder:
     """Something committed this phase that could not be carried out.
 
     A plan is checked when it is given and carried out a phase later, so a
-    promise can stop being legal in between - the ground an order marched out
-    of may have changed hands first. Those troops are simply gone, and a player
-    who is not told reads it as the game losing their orders.
+    promise can stop being legal in between - ground that was within reach may
+    have changed hands first. Those troops are simply gone, and a player who is
+    not told reads it as the game losing their plan.
     """
 
     player: str | None

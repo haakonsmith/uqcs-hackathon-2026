@@ -26,7 +26,6 @@ from protocol import (
     Judged,
     LobbyChanged,
     MovesResolved,
-    MoveTroops,
     PlaceTroops,
     Planned,
     ReadySet,
@@ -188,20 +187,6 @@ class Server:
                 # troop count in that state would say how much of one is left.
                 return self._planned(self.round, player.id)
 
-            case MoveTroops(source=source, target=target, count=count):
-                player = self._player(ws)
-                if player is None or self.round is None:
-                    return Refused(reason="no game in progress")
-                try:
-                    orders = self.round.order(player.id, source, target, count)
-                except combat.IllegalMove as error:
-                    return Refused(reason=str(error))
-
-                logger.info(f"{_label(player)} ordered {count} from {source} to {target} ({len(orders)} orders)")
-                # Deliberately not broadcast either: orders stay secret until
-                # they land, or marching into somebody is never a surprise.
-                return self._planned(self.round, player.id)
-
             case CancelPlan():
                 player = self._player(ws)
                 if player is None or self.round is None:
@@ -311,14 +296,12 @@ class Server:
     def _planned(self, round: Round, player_id: UUID) -> Planned:
         """One player's whole plan for the phase, as the answer to a move.
 
-        Every move in a commanding phase answers with all of it rather than
-        with what it changed, because placing and marching draw on the same
-        troops: an answer naming only one of them leaves the client to work out
-        the other, and the two would disagree the moment a move was refused.
+        All of it rather than what changed, so the client never has to work out
+        the rest for itself - the two would disagree the moment a move was
+        refused.
         """
         return Planned(
             placements=round.placements_for(player_id),
-            orders=round.orders_for(player_id),
             remaining=round.troops_left(player_id),
             round=round.state(),
         )
