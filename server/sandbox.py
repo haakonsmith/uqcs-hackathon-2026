@@ -165,29 +165,71 @@ def probe() -> Isolation:
     )
 
 
-async def self_test() -> str | None:
-    """Run something trivial in the sandbox. None if it worked, else why not.
+# How much bwrap is asked for, most isolating first. Every rung keeps the two
+# things that matter - no network, and nothing writable but the scratch
+# directory - and gives up a mount at a time, because which mounts a host
+# permits is not something this can know in advance.
+#
+# A rootless container refuses them from the top down: `--dev` cannot mount a
+# devpts, and nested even `--dev-bind` on a single node is denied. Rather than
+# guess, `self_test` walks this list at startup and keeps the first rung that
+# runs, so the same image works on a bare host and inside podman.
+BWRAP_PROFILES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("full", ("--dev-bind", "/dev/null", "/dev/null", "--dev-bind", "/dev/urandom", "/dev/urandom", "--proc", "/proc")),
+    ("no-dev", ("--proc", "/proc")),
+    ("no-proc", ()),
+)
 
-    Being installed is not the same as working. `bwrap` needs unprivileged
-    user namespaces, which a hardened kernel or a container can have turned
-    off, and in that case every submission fails at the point where a player
-    is waiting on a verdict rather than at startup where an operator would see
-    it. Cheap enough to pay for at boot.
-    """
-    if ISOLATION.wrapper == "none":
-        return "no wrapper installed"
-
-    result = await run("print('sandbox ok')", "", Limits(cpu_seconds=5, wall_seconds=10.0))
-    if result.timed_out:
-        return "the sandbox timed out running a one-line program"
-    if result.exit_code != 0:
-        return (result.stderr.strip() or f"exit code {result.exit_code}").splitlines()[-1][:200]
-    if result.stdout.strip() != "sandbox ok":
-        return f"unexpected output {result.stdout.strip()[:80]!r}"
-    return None
+# Which rung is in use. Set by `self_test`; the first is only a starting guess.
+_profile = BWRAP_PROFILES[0]
 
 
 ISOLATION = probe()
+
+
+async def self_test() -> str | None:
+    """Find a sandbox configuration that runs here. None if one does, else why not.
+
+    Being installed is not the same as working. `bwrap` needs unprivileged
+    user namespaces, and which mounts it may make depends on what it is nested
+    inside - a rootless container refuses several that a bare host allows. So
+    rather than assert one configuration and fail, this walks `BWRAP_PROFILES`
+    from most isolating down and keeps the first that runs.
+
+    Cheap enough to pay for at boot, and far better paid there than at the
+    point where a player is waiting on a verdict.
+    """
+    global _profile
+
+    if ISOLATION.wrapper == "none":
+        return "no wrapper installed"
+
+    rungs = BWRAP_PROFILES if ISOLATION.wrapper == "bwrap" else ((_profile[0], _profile[1]),)
+    failures: list[str] = []
+    for rung in rungs:
+        if ISOLATION.wrapper == "bwrap":
+            _profile = rung
+
+        failure = await _try_once()
+        if failure is None:
+            if ISOLATION.wrapper == "bwrap" and rung is not BWRAP_PROFILES[0]:
+                logger.warning(f"bwrap profile {rung[0]!r}: this host refused the mounts above it")
+            return None
+        failures.append(f"{rung[0]}: {failure}")
+
+    return "; ".join(failures)
+
+
+async def _try_once() -> str | None:
+    """Run a one-line program through the sandbox as it is currently set up."""
+    result = await run("print('sandbox ok')", "", Limits(cpu_seconds=5, wall_seconds=10.0))
+    if result.timed_out:
+        return "timed out running a one-line program"
+    if result.exit_code != 0:
+        return (result.stderr.strip() or f"exit code {result.exit_code}").splitlines()[-1][:160]
+    if result.stdout.strip() != "sandbox ok":
+        return f"unexpected output {result.stdout.strip()[:60]!r}"
+    return None
 
 
 def _macos_profile(scratch: Path) -> str:
@@ -214,6 +256,22 @@ def _macos_profile(scratch: Path) -> str:
 """
 
 
+def _bwrap_argv(scratch: Path, extras: tuple[str, ...]) -> list[str]:
+    """bwrap's arguments for one rung of `BWRAP_PROFILES`."""
+    root = str(scratch.resolve())
+    return [
+        "bwrap",
+        "--unshare-all",  # no network, no PID namespace sharing
+        "--die-with-parent",
+        # Read-only everywhere, writable only in the scratch directory. This
+        # pair is the isolation; the rungs above only vary what else is mounted.
+        "--ro-bind", "/", "/",
+        *extras,
+        "--bind", root, root,
+        "--chdir", root,
+    ]
+
+
 def _wrapper_argv(scratch: Path) -> list[str]:
     """The isolation command the interpreter is launched underneath."""
     if ISOLATION.wrapper == "sandbox-exec":
@@ -222,22 +280,7 @@ def _wrapper_argv(scratch: Path) -> list[str]:
         return ["sandbox-exec", "-f", str(profile)]
 
     if ISOLATION.wrapper == "bwrap":
-        return [
-            "bwrap",
-            "--unshare-all",  # no network, no PID namespace sharing
-            "--die-with-parent",
-            "--ro-bind", "/", "/",
-            # Individual device nodes rather than `--dev /dev`. `--dev` mounts
-            # a fresh devtmpfs and a devpts on top of it, which a rootless
-            # container is not allowed to do: nested, it fails outright with
-            # "Can't mount devpts". Binding the two nodes CPython actually
-            # wants costs nothing and works at any nesting depth.
-            "--dev-bind", "/dev/null", "/dev/null",
-            "--dev-bind", "/dev/urandom", "/dev/urandom",
-            "--proc", "/proc",
-            "--bind", str(scratch.resolve()), str(scratch.resolve()),
-            "--chdir", str(scratch.resolve()),
-        ]
+        return _bwrap_argv(scratch, _profile[1])
 
     return []
 
@@ -280,17 +323,24 @@ async def run(source: str, stdin: str, limits: Limits | None = None) -> Complete
 
 
 async def _spawn(argv: list[str], stdin: str, limits: Limits, scratch: Path) -> Completed:
-    process = await asyncio.create_subprocess_exec(
-        *argv,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=scratch,
-        env=_environment(scratch),
-        # Its own process group, so a solution that spawns children can be
-        # killed as a whole rather than leaving orphans behind.
-        start_new_session=True,
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=scratch,
+            env=_environment(scratch),
+            # Its own process group, so a solution that spawns children can be
+            # killed as a whole rather than leaving orphans behind.
+            start_new_session=True,
+        )
+    except OSError as error:
+        # The wrapper is missing, or the kernel refused to start it. That is a
+        # run that did not happen, not an exception for the caller to handle:
+        # raising here would take out whichever submission triggered it, and
+        # would stop `self_test` walking to a profile that does work.
+        return Completed(stdout="", stderr=f"could not start {argv[0]}: {error}", exit_code=-1)
 
     try:
         stdout, stderr = await asyncio.wait_for(
