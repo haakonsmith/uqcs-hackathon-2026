@@ -29,7 +29,7 @@ KEYS: dict[Phase, str] = {
 # that is what somebody opening it mid-round is looking for.
 PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
     "submitting": [
-        ("[s]", "write a solution in $EDITOR, submit on quit"),
+        ("[s]", "write a solution in your editor, submit when you are done"),
         ("[v]", "show the last result again"),
         ("[f]", "finished - ends the phase once everyone is"),
     ],
