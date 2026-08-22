@@ -193,6 +193,26 @@ BANK: tuple[Entry, ...] = (
             TestCase("-10 -20", "-30"),
         ),
     ),
+    Entry(
+            problem=Problem(
+                id="claude",
+                title="Whipping Claude",
+                statement=(
+                    "Given an array of 10 chars claude has to pick out the # from the rest of the chars"
+                    "and return the number of # it found. Any error in count will result in claude being"
+                    "savagely whipped."
+                ),
+                signature="stdin: array -> stdout: one integer",
+                examples=[(['#','#','#','d','#','#','#','f','#','#'], "8")],
+            ),
+            tests=(
+                TestCase(['#','#','#','#','#','#','#','#','#','#'], "10"),
+                TestCase(['#','3','s','f','b','h','e','d','g','h'], "1"),
+                TestCase(['#','f','#','d','#','#','g','#','#','#'], "7"),
+                TestCase(['#','#','2','#','4','5','#','8','#','9'], "5"),
+                TestCase(['e','e','e','e','e','e','e','e','e',' '], "0"),
+            )
+        )
 )
 
 _BY_ID = {entry.problem.id: entry for entry in BANK}
