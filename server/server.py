@@ -290,7 +290,7 @@ class Server:
             # Board first, then the story: a client that draws the report
             # before the delta would describe a board it is not showing.
             await self.broadcast(BoardChanged(updates=self.round.updates(resolution.touched)))
-            await self.broadcast(MovesResolved(battles=resolution.battles))
+            await self.broadcast(MovesResolved(battles=resolution.battles, dropped=resolution.dropped))
 
         state = self.round.state()
         logger.info(f"round {state.number}: {before} -> {state.phase} ({state.seconds_left:.0f}s)")

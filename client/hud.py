@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
-from protocol.rounds import BattleReport, Phase, PlayerRound, RoundState, Verdict
+from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
 
 # The short version, for the bar under the board. Both input methods get a
 # mention: the mouse is faster, the keyboard is the one that always works on
@@ -31,7 +31,7 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("click", "reinforce your ground, or assault ground beside it"),
         ("[space]", "place on the picked territory"),
         ("[p]", "place every troop you have left"),
-        ("[m]", "march from here, then click a neighbour"),
+        ("[m]", "march from here, then click a neighbour; [m] again calls it off"),
         ("[1-9]", "how many a place or a march moves"),
         ("[n] [N]", "cycle your territories, then neighbours"),
         ("[c]", "clear everything you have planned"),
@@ -183,7 +183,9 @@ def key_line(round_state: RoundState | None, selected: int | None) -> str:
 
     keys = KEYS.get(round_state.phase, "")
     if selected is not None:
-        keys = f"from {selected} ->  {keys}"
+        # Mid-order the phase keys are the wrong list: what matters is that an
+        # order is half-made, where it starts, and the two ways out of it.
+        return f"  marching from {selected} - click a neighbour  [esc] give up  [m] on {selected} calls it off   {common} "
     return f"  {keys}   {common} "
 
 
@@ -231,16 +233,28 @@ def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> 
     return [*lines, "", "[any key] close   [v] show this again"]
 
 
-def battles_popup(battles: list[BattleReport]) -> list[str]:
-    """What the marching orders did, once they all landed at once."""
-    if not battles:
+def battles_popup(battles: list[BattleReport], dropped: list[DroppedOrder] | None = None) -> list[str]:
+    """What the marching orders did, once they all landed at once.
+
+    Orders that could not be carried out are listed under the battles rather
+    than left out. They move nothing, so they reach the board delta as an
+    absence: troops a player watched themselves commit that are simply not
+    there next round, with no way to tell a lost order from a lost fight.
+    """
+    dropped = dropped or []
+    if not battles and not dropped:
         return ["ORDERS CARRIED OUT", "", "nobody met anybody", "", "[any key] back to the board"]
 
-    lines = ["BATTLES", ""]
+    lines = ["BATTLES", ""] if battles else []
     for battle in battles:
         sides = "  vs  ".join(f"{s.name} {s.troops}" for s in battle.stacks)
         outcome = f"{battle.winner_name} holds it with {battle.survivors}" if battle.winner else "wiped out - unowned"
         lines += [f"territory {battle.territory}: {sides}", f"    {outcome}"]
+
+    if dropped:
+        lines += ["", "NEVER HAPPENED", ""]
+        for order in dropped:
+            lines += [f"{order.name}: {order.count} at territory {order.territory}", f"    {order.reason}"]
     return [*lines, "", "[any key] back to the board"]
 
 

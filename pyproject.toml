@@ -25,9 +25,19 @@ extend-select = ["I"]
 dev = [
     "basedpyright>=1.39.10",
     "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.16.4",
 ]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[tool.pytest.ini_options]
+# The packages are top-level directories rather than an installed distribution,
+# so the repo root has to be importable for `protocol` and `server` to resolve.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+asyncio_mode = "auto"
