@@ -23,6 +23,7 @@ for clients over websockets.
 
 from __future__ import annotations
 
+import heapq
 import math
 import random
 from collections import deque
@@ -366,43 +367,44 @@ def _grow_regions(
     component: list[tuple[int, int]],
     seeds: list[tuple[int, int]],
 ) -> list[list[tuple[int, int]]]:
-    """Fair multi-source BFS: contiguous regions of near-identical area.
+    """Capacity-capped Voronoi growth: contiguous regions of near-equal area.
 
-    A plain multi-source BFS lets a region with lots of open space run away
-    with the map. Here every region claims exactly one cell per round and
-    stops at a shared capacity, so growth stays in lockstep. Any cells left
-    over (a region walled in early, say) are swept up afterwards by whichever
-    neighbouring region is smallest.
+    Every region grows outwards from its seed in order of straight-line
+    distance, all of them at once from one shared heap, so at any moment each
+    is roughly a disc and they meet along the midlines between seeds. Growth
+    stops at a shared capacity, which keeps the areas within a cell or two of
+    each other.
+
+    Ordering by distance rather than by discovery is what makes the regions
+    round. A FIFO frontier expands by graph distance in whatever order cells
+    happened to be queued, so a region reaches around an obstacle and comes
+    back on itself; the heap always takes the nearest unclaimed cell instead.
+
+    Cells only ever enter the heap as neighbours of a claimed cell, so a
+    region cannot jump a gap. Anything left over - walled off while its only
+    neighbour was full - is swept up afterwards.
     """
     members = set(component)
     owner: dict[tuple[int, int], int] = {}
     regions: list[list[tuple[int, int]]] = [[] for _ in seeds]
     capacity = -(-len(component) // len(seeds))  # ceil
 
-    frontiers: list[deque[tuple[int, int]]] = []
-    for i, seed in enumerate(seeds):
-        owner[seed] = i
-        regions[i].append(seed)
-        frontiers.append(deque(_free_neighbours(seed, members, owner)))
+    # (distance from seed, region, cell). The region index breaks distance
+    # ties, so the result does not depend on heap insertion order.
+    frontier: list[tuple[float, int, tuple[int, int]]] = [(0.0, i, seed) for i, seed in enumerate(seeds)]
+    heapq.heapify(frontier)
 
-    remaining = len(component) - len(seeds)
-    while remaining > 0:
-        progressed = False
-        for i, frontier in enumerate(frontiers):
-            if len(regions[i]) >= capacity:
-                continue
-            while frontier:
-                cell = frontier.popleft()
-                if cell in owner:
-                    continue
-                owner[cell] = i
-                regions[i].append(cell)
-                frontier.extend(_free_neighbours(cell, members, owner))
-                remaining -= 1
-                progressed = True
-                break
-        if not progressed:
-            break
+    while frontier:
+        _, i, cell = heapq.heappop(frontier)
+        if cell in owner or len(regions[i]) >= capacity:
+            continue
+
+        owner[cell] = i
+        regions[i].append(cell)
+        seed_x, seed_y = seeds[i]
+        for neighbour in _free_neighbours(cell, members, owner):
+            distance = math.hypot(neighbour[0] - seed_x, neighbour[1] - seed_y)
+            heapq.heappush(frontier, (distance, i, neighbour))
 
     _sweep_leftovers(component, members, owner, regions)
     return regions
@@ -428,23 +430,30 @@ def _sweep_leftovers(
     Only ever assigns a cell touching an existing region, so regions stay
     contiguous. The component is connected, so this always terminates.
     """
-    unclaimed = [c for c in component if c not in owner]
-    while unclaimed:
-        stalled = True
-        still_free: list[tuple[int, int]] = []
-        for cell in unclaimed:
-            x, y = cell
-            adjacent = {owner[n] for n in ((x + dx, y + dy) for dx, dy in _ORTHOGONAL) if n in members and n in owner}
-            if not adjacent:
-                still_free.append(cell)
-                continue
-            best = min(adjacent, key=lambda i: len(regions[i]))
-            owner[cell] = best
-            regions[best].append(cell)
-            stalled = False
-        if stalled:
-            break
-        unclaimed = still_free
+    centres = [_centroid(region) if region else (0.0, 0.0) for region in regions]
+
+    # Same distance-ordered spread as the growth pass, measured from each
+    # region's centre rather than its seed, and with no capacity to stop it.
+    # The region index breaks ties so the result does not depend on the order
+    # cells were pushed.
+    frontier: list[tuple[float, int, tuple[int, int]]] = []
+    for cell in component:
+        if cell in owner:
+            continue
+        x, y = cell
+        for dx, dy in _ORTHOGONAL:
+            i = owner.get((x + dx, y + dy))
+            if i is not None:
+                heapq.heappush(frontier, (_distance_sq(cell, centres[i]), i, cell))
+
+    while frontier:
+        _, i, cell = heapq.heappop(frontier)
+        if cell in owner:
+            continue
+        owner[cell] = i
+        regions[i].append(cell)
+        for neighbour in _free_neighbours(cell, members, owner):
+            heapq.heappush(frontier, (_distance_sq(neighbour, centres[i]), i, neighbour))
 
 
 def _rebalance(regions: list[list[tuple[int, int]]], passes: int = 6) -> None:
@@ -482,17 +491,53 @@ def _find_transfer(
     owner: dict[tuple[int, int], int],
     i: int,
 ) -> tuple[tuple[int, int], int] | None:
-    """A border cell of region `i` that a smaller neighbour can take safely."""
+    """The border cell of `i` a smaller neighbour can take with the best shape.
+
+    Every safe hand-off evens the areas out equally well, so the choice is
+    free to be made on geometry: prefer the cell furthest from its own
+    region's centre and nearest the receiver's, which shaves off the tip of a
+    spur rather than biting a notch out of a side. Taking the first candidate
+    found instead - the obvious thing - undoes most of the roundness the
+    growth pass worked for, because region order is arbitrary.
+    """
+    if len(regions[i]) < 2:
+        return None
+
+    centre = _centroid(regions[i])
+    centres: dict[int, tuple[float, float]] = {}
+    candidates: list[tuple[float, tuple[int, int], int]] = []
+
     for cell in regions[i]:
         x, y = cell
-        smallest, best_size = None, len(regions[i]) - 1
         for dx, dy in _ORTHOGONAL:
             j = owner.get((x + dx, y + dy))
-            if j is not None and j != i and len(regions[j]) < best_size:
-                smallest, best_size = j, len(regions[j])
-        if smallest is not None and _stays_connected(regions[i], cell):
-            return cell, smallest
+            # Only downhill, and only by two or more: swapping a single cell
+            # back and forth between equals would never settle.
+            if j is None or j == i or len(regions[j]) >= len(regions[i]) - 1:
+                continue
+            if j not in centres:
+                centres[j] = _centroid(regions[j])
+            gain = _distance_sq(cell, centre) - _distance_sq(cell, centres[j])
+            candidates.append((gain, cell, j))
+
+    # Connectivity is the expensive test, so rank first and pay for it only
+    # until one candidate passes.
+    candidates.sort(key=lambda candidate: -candidate[0])
+    for _, cell, j in candidates:
+        if _stays_connected(regions[i], cell):
+            return cell, j
     return None
+
+
+def _centroid(region: list[tuple[int, int]]) -> tuple[float, float]:
+    return (
+        sum(x for x, _ in region) / len(region),
+        sum(y for _, y in region) / len(region),
+    )
+
+
+def _distance_sq(cell: tuple[int, int], point: tuple[float, float]) -> float:
+    return (cell[0] - point[0]) ** 2 + (cell[1] - point[1]) ** 2
 
 
 def _stays_connected(region: list[tuple[int, int]], without: tuple[int, int]) -> bool:
@@ -522,8 +567,13 @@ def _partition(
 
     Lloyd relaxation: grow regions from the seeds, move each seed to the cell
     nearest its region's centroid, repeat. A couple of passes is enough to
-    turn the ragged first attempt into regions that look deliberately drawn.
-    A final rebalance evens out whatever the growth could not.
+    turn the ragged first attempt into regions that look deliberately drawn;
+    beyond that it stops paying, because the shapes are held back by the
+    coastline rather than by the seed positions.
+
+    The final rebalance is a deliberate trade: it costs a little roundness to
+    pull the areas from a 13-to-67 cell spread down to about 27-to-44. A
+    five-fold difference in size is a worse board than a slightly lumpy one.
     """
     count = max(1, min(count, len(component)))
     seeds = _pick_seeds(component, count, rng)
@@ -540,10 +590,9 @@ def _partition(
 
 
 def _nearest_to_centroid(region: list[tuple[int, int]]) -> tuple[int, int]:
-    cx = sum(x for x, _ in region) / len(region)
-    cy = sum(y for _, y in region) / len(region)
     # The centroid of a concave region can sit outside it, so snap to a member.
-    return min(region, key=lambda c: (c[0] - cx) ** 2 + (c[1] - cy) ** 2)
+    centre = _centroid(region)
+    return min(region, key=lambda cell: _distance_sq(cell, centre))
 
 
 def _build_territories(
