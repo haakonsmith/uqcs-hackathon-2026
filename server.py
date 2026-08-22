@@ -1,13 +1,10 @@
 import asyncio
-import json
-import logging
 import random
 
 import websockets
-from websockets.asyncio.server import serve
-from websockets.exceptions import ConnectionClosedError
 
-import server.player
+from server import player
+from server.server import Server
 
 gameState = {}
 players = {}
@@ -32,7 +29,7 @@ def createTerritory(name: str, id: str):  # no arguments for now
 async def startMenu(websocket: websockets.ServerConnection):
     content = await websocket.recv()
     if content == "joinGame":
-        players[websocket] = player(websocket)
+        players[websocket] = player.Player(websocket.id)
         if lobbyCount < playersTarget:
             await websocket.send("Logging in")
             await lobby(websocket)
@@ -73,41 +70,6 @@ async def clients(websocket: websockets.ServerConnection):
             if players[websocket].getStatus() == "LOBBY":
                 lobbyCount -= 1
             del players[websocket]
-
-
-class Server:
-    def __init__(self) -> None:
-        self.connections: set[websockets.ServerConnection] = set()
-
-    async def register_connection(self, websocket: websockets.ServerConnection):
-        logging.info("Connection received")
-        self.connections.add(websocket)
-
-        async for message in websocket:
-            if isinstance(message, str):
-                event = json.loads(message)
-
-                print(f"got event {event}")
-
-    async def handler(self, websocket: websockets.ServerConnection):
-        try:
-            await self.register_connection(websocket)
-        except ConnectionClosedError:
-            logging.warning("Connection abruptly closed!")
-        finally:
-            self.connections.remove(websocket)
-
-    async def run(self):
-
-        async with serve(
-            self.handler,
-            "localhost",
-            8888,
-            ping_interval=None,
-            max_size=64 * 1024 * 1024,
-        ):
-            logging.info("Server started")
-            await asyncio.Future()
 
 
 async def main():
