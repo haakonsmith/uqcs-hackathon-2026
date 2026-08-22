@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import time
 from dataclasses import dataclass, field, replace
 from uuid import UUID
 
@@ -136,7 +135,8 @@ class App:
     # When a held popup may be dismissed, on the monotonic clock. Panels that
     # arrive unasked - the reveal, the winner - are held for a few seconds so
     # they cannot be closed by a key already on its way down.
-    popup_hold_until: float = 0.0
+    # The last panel shown, so `[v]` can put it back after a dismissal.
+    last_popup: list[str] | None = None
     # Troops the next place or march will move, set with the number keys.
     move_count: int = 1
     # The last verdict, kept so [v] can bring it back. Dismissing a popup
@@ -231,17 +231,16 @@ class App:
         moved = False
 
         if self.popup is not None:
-            # Nudging the mouse is not "any key". Motion arrives as a
-            # keystroke here and a hand resting on the desk produces a stream
-            # of it, which used to close a panel the moment it appeared.
-            if (key.name or "").startswith("MOUSE_") and key.name != "MOUSE_LEFT":
-                return
-            if time.monotonic() < self.popup_hold_until:
+            # No mouse input closes a panel, clicks included. Motion arrives
+            # here as a keystroke and a hand resting on the desk produces a
+            # stream of it, and a click aimed at the board underneath is not a
+            # decision to dismiss what is covering it. A panel goes away when
+            # a player presses a key, and stays until then.
+            if (key.name or "").startswith("MOUSE_"):
                 return
             # The panel was drawn over the terrain, so the terrain under it
             # has to be drawn again to erase it.
             self.popup = None
-            self.popup_hold_until = 0.0
             self.dirty = True
             return
 
@@ -329,11 +328,23 @@ class App:
         return False
 
     def _show_verdict(self) -> None:
-        """Bring the last result back, for a player who dismissed it too fast."""
-        if self.last_verdict is None:
-            self._say("no submission yet this round")
+        """Put the last panel back, for a player who closed it too quickly.
+
+        Whatever was last shown, not only a verdict: a battle report arrives
+        unasked the instant a phase ends, which makes it the one most likely
+        to be dismissed by a keystroke meant for something else.
+
+        Verdicts are rebuilt rather than replayed, so the attempt count and
+        best-so-far line are current rather than whatever they said when the
+        panel first appeared.
+        """
+        if self.last_verdict is not None:
+            self._show_popup(hud.verdict_popup(self.last_verdict, self.round, self.me))
             return
-        self._show_popup(hud.verdict_popup(self.last_verdict, self.round, self.me))
+        if self.last_popup is not None:
+            self._show_popup(self.last_popup)
+            return
+        self._say("nothing to show again yet")
 
     async def _submit(self) -> None:
         """Open the player's editor, then submit whatever they saved."""
@@ -590,25 +601,17 @@ class App:
         self.message = message
         self.dirty = True
 
-    def _show_popup(self, lines: list[str], hold: float = 0.0) -> None:
-        """Put a panel up, refusing to close it for `hold` seconds."""
-        self.popup = lines
-        self.popup_hold_until = time.monotonic() + hold if hold else 0.0
-        self.dirty = True
+    def _show_popup(self, lines: list[str]) -> None:
+        """Put a panel up, and remember it so `[v]` can bring it back.
 
-    def _panel(self) -> list[str]:
-        """The popup as it should be drawn right now.
-
-        A held panel's last line is its dismiss hint, and while pressing a key
-        would do nothing the hint says when it will start working instead. The
-        countdown moves because the phase clock repaints once a second anyway.
+        Panels wait rather than expire. A result that vanishes on a timer is a
+        result somebody looked away from and lost, and the ones that appear
+        unasked - a battle report the moment a phase ends - are exactly the
+        ones worth reading.
         """
-        if self.popup is None:
-            return []
-        left = self.popup_hold_until - time.monotonic()
-        if left <= 0 or not self.popup:
-            return self.popup
-        return [*self.popup[:-1], hud.hold_notice(left)]
+        self.popup = lines
+        self.last_popup = lines
+        self.dirty = True
 
     def _handle_mouse(self, key: Keystroke) -> bool:
         # Keystroke reports mouse position as mouse_xy, not .x / .y, and gives
@@ -659,7 +662,7 @@ class App:
             frame.row(view.drawn_rows + offset, text)
 
         if self.popup is not None:
-            hud.draw_panel(frame, self._panel())
+            hud.draw_panel(frame, self.popup)
         elif self.scoreboard:
             hud.draw_panel(frame, hud.scoreboard(self.round, self.me))
 
@@ -704,10 +707,13 @@ class App:
                 self.refresh_hover()
                 self.dirty = True
             case MovesResolved(battles=battles):
-                self._show_popup(hud.battles_popup(battles), hold=hud.reveal_hold(battles))
+                # Newer than any verdict from this round, so [v] should
+                # bring this back rather than the submission before it.
+                self.last_verdict = None
+                self._show_popup(hud.battles_popup(battles))
                 self._say(f"{len(battles)} battles" if battles else "orders carried out")
             case GameOver(name=name):
-                self._show_popup(hud.game_over_popup(name), hold=hud.GAME_OVER_HOLD_SECONDS)
+                self._show_popup(hud.game_over_popup(name))
                 self._say(f"{name} has taken the whole board - game over")
             case _:
                 logger.debug("unhandled server event %r", event)

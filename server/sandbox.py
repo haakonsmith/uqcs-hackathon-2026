@@ -115,9 +115,28 @@ class Completed:
         return self.exit_code == 0 and not self.timed_out
 
 
+# Where a wrapper lives when PATH does not say. A systemd unit gets a stripped
+# environment, and "the sandbox silently turned itself off" is too quiet a
+# failure to leave resting on one lookup.
+WELL_KNOWN = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
+
+
+def find(name: str) -> str | None:
+    """The wrapper's path, from PATH or from where it is usually installed."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in WELL_KNOWN:
+        candidate = Path(directory) / name
+        if candidate.exists():
+            logger.debug("%s not on PATH, using %s", name, candidate)
+            return str(candidate)
+    return None
+
+
 def probe() -> Isolation:
     """Work out which sandbox is available, once, at startup."""
-    if sys.platform == "darwin" and shutil.which("sandbox-exec"):
+    if sys.platform == "darwin" and find("sandbox-exec"):
         return Isolation(
             wrapper="sandbox-exec",
             blocks_network=True,
@@ -126,7 +145,7 @@ def probe() -> Isolation:
             # macOS accepts RLIMIT_AS and then refuses every value.
             limits_memory=False,
         )
-    if shutil.which("bwrap"):
+    if find("bwrap"):
         return Isolation(
             wrapper="bwrap",
             blocks_network=True,
@@ -136,6 +155,7 @@ def probe() -> Isolation:
             blocks_fork=False,
             limits_memory=sys.platform.startswith("linux"),
         )
+    logger.debug("no sandbox wrapper: looked for bwrap and sandbox-exec on PATH and in %s", ", ".join(WELL_KNOWN))
     return Isolation(
         wrapper="none",
         blocks_network=False,
@@ -143,6 +163,28 @@ def probe() -> Isolation:
         blocks_fork=False,
         limits_memory=sys.platform.startswith("linux"),
     )
+
+
+async def self_test() -> str | None:
+    """Run something trivial in the sandbox. None if it worked, else why not.
+
+    Being installed is not the same as working. `bwrap` needs unprivileged
+    user namespaces, which a hardened kernel or a container can have turned
+    off, and in that case every submission fails at the point where a player
+    is waiting on a verdict rather than at startup where an operator would see
+    it. Cheap enough to pay for at boot.
+    """
+    if ISOLATION.wrapper == "none":
+        return "no wrapper installed"
+
+    result = await run("print('sandbox ok')", "", Limits(cpu_seconds=5, wall_seconds=10.0))
+    if result.timed_out:
+        return "the sandbox timed out running a one-line program"
+    if result.exit_code != 0:
+        return (result.stderr.strip() or f"exit code {result.exit_code}").splitlines()[-1][:200]
+    if result.stdout.strip() != "sandbox ok":
+        return f"unexpected output {result.stdout.strip()[:80]!r}"
+    return None
 
 
 ISOLATION = probe()
