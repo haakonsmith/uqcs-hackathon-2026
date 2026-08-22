@@ -351,6 +351,7 @@ def draw_garrisons(
     view: Viewport,
     factions: Factions,
     placements: dict[int, int] | None = None,
+    outbound: dict[int, int] | None = None,
 ) -> None:
     """How many soldiers sit on each visible territory, over its middle.
 
@@ -362,6 +363,11 @@ def draw_garrisons(
     rather than added into it because the two are not the same thing: the count
     is what would defend the ground if the phase ended now, and the `(+n)` is
     what a plan the player can still tear up would add to it.
+
+    `outbound` is the other half of the same plan: troops ordered to march out,
+    drawn as a `-n`. Without it the only record of an order is a running total
+    on the phase bar, so a player checking whether they already committed a
+    frontier has to remember rather than look.
 
     Each count carries its holder's colour as a background rather than being
     bare text, so it reads as a chip on the map instead of a number floating
@@ -375,9 +381,11 @@ def draw_garrisons(
     board_width = view.drawn_cols * CELL_WIDTH
     taken: set[tuple[int, int]] = set()
     pending = placements or {}
+    leaving = outbound or {}
 
     for territory in world.territories:
         placed = pending.get(territory.id, 0)
+        marching = leaving.get(territory.id, 0)
         # Unclaimed ground has no garrison to report, only a colour - unless
         # this player has promised troops to it, which is the one thing about
         # empty ground worth saying.
@@ -399,7 +407,11 @@ def draw_garrisons(
             label = f"(+{placed})"
             background = ALLIED if factions.you is None else factions.colors[factions.you]
         else:
-            label = f"{territory.soldiers}(+{placed})" if placed else str(territory.soldiers)
+            # One bracket for the whole plan, not one each: `5(+2-3)` fits on a
+            # crowded board where `5(+2)(-3)` is dropped for want of room.
+            plan = f"+{placed}" if placed else ""
+            plan += f"-{marching}" if marching else ""
+            label = f"{territory.soldiers}({plan})" if plan else str(territory.soldiers)
             background = side_color(factions, territory.id)
         # Centred on the cell, which is two columns wide; a count wider than
         # that spreads either side of it rather than hanging off to the right.

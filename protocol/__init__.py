@@ -57,6 +57,7 @@ from protocol.rounds import (
     BattleReport,
     CaseResult,
     CaseStatus,
+    DroppedOrder,
     MoveOrder,
     Phase,
     Placement,
@@ -65,6 +66,7 @@ from protocol.rounds import (
     RoundState,
     TerritoryUpdate,
     Verdict,
+    troops_to_send,
 )
 from protocol.terrain import TerrainInfo, TerritoryState, World
 
@@ -78,6 +80,7 @@ __all__ = [
     "CaseStatus",
     "ClientRequest",
     "Connection",
+    "DroppedOrder",
     "Echo",
     "Echoed",
     "EvtFrame",
@@ -121,4 +124,5 @@ __all__ = [
     "dump_frame",
     "parse_frame",
     "response_types",
+    "troops_to_send",
 ]

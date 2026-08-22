@@ -35,7 +35,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from protocol.rounds import BattleReport, MoveOrder, Placement, Stack
+from protocol.rounds import BattleReport, DroppedOrder, MoveOrder, Placement, Stack, troops_to_send
 from protocol.terrain import Territory, WorldMap
 
 logger = logging.getLogger("Combat")
@@ -84,10 +84,6 @@ class Plan:
         """Troops promised to a territory this phase, not yet standing on it."""
         return self.placements.get(player, {}).get(territory, 0)
 
-    def committed(self, player: UUID, source: int) -> int:
-        """Troops already promised out of a territory, so it cannot overdraw."""
-        return sum(o.count for o in self.orders.get(player, ()) if o.source == source)
-
     def __bool__(self) -> bool:
         return any(self.orders.values()) or any(self.placements.values())
 
@@ -96,17 +92,26 @@ class Plan:
 class Resolution:
     battles: list[BattleReport]
     touched: tuple[int, ...]
+    # Orders and placements the phase could not carry out. Separate from
+    # `battles` because they change nothing on the board, so a client with only
+    # the delta and the battle list has no way to show that they happened.
+    dropped: list[DroppedOrder] = field(default_factory=list)
 
 
 def sendable(board: WorldMap, plan: Plan, player: UUID, territory_id: int) -> int:
     """Troops a territory can still be ordered to march out.
 
-    The garrison standing on it, plus anything placed on it this phase, less
-    everything already ordered away - reinforcements can attack the turn they
-    arrive, and no soldier can be sent twice.
+    The sum itself is `troops_to_send`, shared with the client so the two ends
+    cannot disagree about which orders are legal. This is only the half that
+    knows where a board and a plan keep the three numbers it wants.
     """
     territory = _territory(board, territory_id)
-    return territory.soldiers + plan.placed(player, territory_id) - plan.committed(player, territory_id)
+    return troops_to_send(
+        garrison=territory.soldiers,
+        placed=plan.placed(player, territory_id),
+        orders=plan.orders.get(player, ()),
+        source=territory_id,
+    )
 
 
 def validate(board: WorldMap, plan: Plan, player: UUID, order: MoveOrder) -> None:
@@ -146,8 +151,14 @@ def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int
 def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
     """Carry out a whole phase at once: troops land, then everybody marches."""
     touched: set[int] = set()
+    dropped: list[DroppedOrder] = []
     # territory -> owner -> troops arriving
     arrivals: dict[int, dict[UUID, int]] = defaultdict(lambda: defaultdict(int))
+
+    def drop(player: UUID, territory: int, count: int, reason: str) -> None:
+        """Record troops the phase could not move, and say who lost them."""
+        logger.info("dropping %d of %s at %d: %s", count, _name(player, names), territory, reason)
+        dropped.append(DroppedOrder(player=str(player), name=_name(player, names), territory=territory, count=count, reason=reason))
 
     # Reinforcements first, so they are part of the garrison the orders below
     # march out of and fight with. Troops placed on somebody else's ground
@@ -161,7 +172,7 @@ def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
             elif _borders(board, player, territory):
                 arrivals[territory_id][player] += count
             else:
-                logger.debug("dropping %d placed on %s: out of reach", count, territory_id)
+                drop(player, territory_id, count, "out of reach when the phase ended")
                 continue
             touched.add(territory_id)
 
@@ -170,8 +181,11 @@ def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
             source = board.territories[order.source]
             # An order given before the source was lost is simply not carried
             # out: those troops were captured with the ground they stood on.
-            if source.owner != player or source.soldiers < order.count:
-                logger.debug("dropping %s from %s: source no longer holds it", order, player)
+            if source.owner != player:
+                drop(player, order.source, order.count, "no longer yours when the phase ended")
+                continue
+            if source.soldiers < order.count:
+                drop(player, order.source, order.count, f"only {source.soldiers} were left to send")
                 continue
             source.soldiers -= order.count
             arrivals[order.target][player] += order.count
@@ -184,7 +198,7 @@ def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
         if battle is not None:
             battles.append(battle)
 
-    return Resolution(battles=battles, touched=tuple(sorted(touched)))
+    return Resolution(battles=battles, touched=tuple(sorted(touched)), dropped=dropped)
 
 
 def _settle(

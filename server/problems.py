@@ -212,26 +212,53 @@ BANK: tuple[Entry, ...] = (
         ),
     ),
     Entry(
-            problem=Problem(
-                id="claude",
-                title="Whipping Claude",
-                statement=(
-                    "Given an array of 10 chars claude has to pick out the # from the rest of the chars"
-                    "and return the number of # it found. Any error in count will result in claude being"
-                    "savagely whipped."
-                ),
-                signature="stdin: array -> stdout: one integer",
-                examples=[(['#','#','#','d','#','#','#','f','#','#'], "8")],
+        problem=Problem(
+            id="claude",
+            title="Whipping Claude",
+            statement=(
+                "Given a line of 10 characters, Claude has to pick out the # from the rest "
+                "and print how many # it found. Any error in the count will result in Claude "
+                "being savagely whipped."
             ),
-            tests=(
-                TestCase(['#','#','#','#','#','#','#','#','#','#'], "10"),
-                TestCase(['#','3','s','f','b','h','e','d','g','h'], "1"),
-                TestCase(['#','f','#','d','#','#','g','#','#','#'], "7"),
-                TestCase(['#','#','2','#','4','5','#','8','#','9'], "5"),
-                TestCase(['e','e','e','e','e','e','e','e','e',' '], "0"),
-            )
-        )
+            signature="stdin: one line of 10 characters -> stdout: one integer",
+            examples=[("###d###f##", "8")],
+        ),
+        tests=(
+            TestCase("##########", "10"),
+            TestCase("#3sfbhedgh", "1"),
+            TestCase("#f#d##g###", "7"),
+            TestCase("##2#45#8#9", "5"),
+            TestCase("eeeeeeeee ", "0"),
+        ),
+    ),
 )
+
+
+def _check_bank() -> None:
+    """Refuse to start on a malformed problem rather than at the first deal.
+
+    A `Problem` crosses the wire as pydantic; a `TestCase` is fed to
+    `sandbox.run`, which encodes it. Neither is validated where it is written,
+    so a list where a string belongs sits in the bank until the round it is
+    dealt in - and then it takes down every connected client at once, because
+    the problem travels inside `RoundChanged`. Checking at import turns that
+    into a stack trace on the machine whose bank is wrong.
+    """
+    for entry in BANK:
+        where = f"problem {entry.problem.id!r}"
+        for given, wanted in entry.problem.examples:
+            if not isinstance(given, str) or not isinstance(wanted, str):
+                raise TypeError(f"{where}: examples must be (str, str), got ({given!r}, {wanted!r})")
+        for case in entry.tests:
+            if not isinstance(case.stdin, str) or not isinstance(case.expected, str):
+                raise TypeError(f"{where}: TestCase takes str stdin and expected, got {case!r}")
+    ids = [entry.problem.id for entry in BANK]
+    duplicates = {i for i in ids if ids.count(i) > 1}
+    if duplicates:
+        raise ValueError(f"duplicate problem ids in the bank: {sorted(duplicates)}")
+
+
+_check_bank()
 
 _BY_ID = {entry.problem.id: entry for entry in BANK}
 

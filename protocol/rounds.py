@@ -34,6 +34,7 @@ clock skew is worse than one that drifts by the network latency.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -186,6 +187,22 @@ class MoveOrder:
     count: int
 
 
+def troops_to_send(garrison: int, placed: int, orders: Iterable[MoveOrder], source: int) -> int:
+    """Troops a territory can still be ordered to march out.
+
+    The garrison standing on it, plus anything placed on it this phase, less
+    everything already ordered away: reinforcements can attack the turn they
+    arrive, and no soldier can be sent twice.
+
+    Here rather than on either side of the wire because both ends need the
+    same number. The server refuses an order that overdraws it; the client
+    clamps to it before asking. Two copies of this sum drifting apart shows up
+    as a client offering marches the server then rejects, which is the one
+    failure a player reads as the game being broken.
+    """
+    return garrison + placed - sum(order.count for order in orders if order.source == source)
+
+
 @dataclass(frozen=True)
 class Placement:
     """Troops of this round's award promised to a territory already owned.
@@ -205,6 +222,23 @@ class Stack:
     owner: str | None
     name: str
     troops: int
+
+
+@dataclass(frozen=True)
+class DroppedOrder:
+    """Something committed this phase that could not be carried out.
+
+    A plan is checked when it is given and carried out a phase later, so a
+    promise can stop being legal in between - the ground an order marched out
+    of may have changed hands first. Those troops are simply gone, and a player
+    who is not told reads it as the game losing their orders.
+    """
+
+    player: str | None
+    name: str
+    territory: int
+    count: int
+    reason: str
 
 
 @dataclass(frozen=True)

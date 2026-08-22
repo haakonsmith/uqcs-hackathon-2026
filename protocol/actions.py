@@ -12,14 +12,14 @@ the response type of a call follows from the request that made it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
 from protocol.lobby import Lobby
-from protocol.rounds import BattleReport, MoveOrder, Placement, RoundState, TerritoryUpdate, Verdict
+from protocol.rounds import BattleReport, DroppedOrder, MoveOrder, Placement, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
 
 # --------------------------------------------------------------------------
@@ -246,10 +246,13 @@ class MovesResolved:
     """The phase ended and every order was carried out at once.
 
     Only contested territories get a report; a march into empty ground of your
-    own is just a board delta.
+    own is just a board delta. `dropped` is the opposite: orders and placements
+    that never happened, which leave no delta at all and so have nowhere else
+    to be told.
     """
 
     battles: list[BattleReport]
+    dropped: list[DroppedOrder] = field(default_factory=list)
     kind: Literal["moves_resolved"] = "moves_resolved"
 
 
