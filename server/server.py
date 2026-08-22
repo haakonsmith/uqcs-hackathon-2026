@@ -44,13 +44,7 @@ class Server:
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
-<<<<<<< HEAD
-        
         self.map: World = world.create_world()
-=======
-
-        self.map: World | None = None
->>>>>>> f8c6684b65f947fdac98e14b9dd9865b98cb6b0a
         self.player_count = 4
 
     async def handle_request(self, ws: websockets.ServerConnection, request: ClientRequest) -> ServerResponse:
@@ -63,12 +57,10 @@ class Server:
                 self.sessions[ws] = player_id
 
                 await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
-<<<<<<< HEAD
-=======
 
                 if len(self.players) >= self.player_count and self.map is None:
                     self.createWorld()
->>>>>>> f8c6684b65f947fdac98e14b9dd9865b98cb6b0a
+
                 return Joined(player_id=str(player_id), world=self.map)
 
             case Echo(text=text):
