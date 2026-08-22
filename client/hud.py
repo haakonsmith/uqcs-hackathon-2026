@@ -13,12 +13,92 @@ from client.viewport import Viewport
 from protocol.rounds import BattleReport, Phase, RoundState, Verdict
 from protocol.terrain import WorldMap
 
-# What each phase lets you do, in the order you would reach for it.
+# The short version, for the bar under the board. Both input methods get a
+# mention: the mouse is faster, the keyboard is the one that always works on
+# a terminal with no mouse reporting. The full list lives behind [?].
 KEYS: dict[Phase, str] = {
-    "submitting": "[s]ubmit  [f]inished",
-    "allocating": "[n]ext territory  [space] place 1  [p] place all  [f]inished",
-    "moving": "[n]ext  [m] source then target  [1-9] count  [c]ancel orders  [f]inished",
+    "submitting": "[s]ubmit  [v] last result  [f]inished",
+    "allocating": "click or [n][space] to place  [1-9] how many  [p] all  [f]inished",
+    "moving": "click source then target, or [n][m]  [1-9] how many  [c]ancel  [f]inished",
 }
+
+# Every binding, grouped, for the [?] panel. Phase-specific first, because
+# that is what somebody opening it mid-round is looking for.
+PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
+    "submitting": [
+        ("[s]", "write a solution in $EDITOR, submit on quit"),
+        ("[v]", "show the last result again"),
+        ("[f]", "finished - ends the phase once everyone is"),
+    ],
+    "allocating": [
+        ("click", "place troops on your own territory"),
+        ("[n] [N]", "cycle through your territories"),
+        ("[space]", "place on the picked territory"),
+        ("[1-9]", "how many a click or [space] places"),
+        ("[p]", "place every troop you have left"),
+        ("[f]", "finished with this phase"),
+    ],
+    "moving": [
+        ("click", "source, then a neighbour, to queue a march"),
+        ("[n] [N]", "cycle territories, then neighbours"),
+        ("[m]", "same as clicking: source, then target"),
+        ("[1-9]", "troops the next order sends"),
+        ("[c]", "cancel every order you have queued"),
+        ("[esc]", "forget the source you picked"),
+        ("[f]", "finished with this phase"),
+    ],
+}
+
+BOARD_HELP: list[tuple[str, str]] = [
+    ("arrows", "scroll the board"),
+    ("wheel", "scroll, shift+wheel sideways"),
+    ("+ -", "zoom in and out"),
+    ("[o]", "ownership overlay"),
+    ("[l]", "legend"),
+    ("[tab]", "scoreboard"),
+    ("[q]", "quit to the menu"),
+]
+
+RULES_HELP: list[str] = [
+    "A round is submit, then allocate, then move.",
+    "Troops earned = 3 + territories/3 + up to 5 for your",
+    "solution, +3 for solving first.",
+    "Orders are secret and all resolve together when the",
+    "moving phase ends: the biggest stack in a territory",
+    "takes it, losing as many troops as the next biggest.",
+    "A tie wipes both out and leaves it unowned.",
+]
+
+
+def help_popup(round_state: RoundState | None, rows: int = 999) -> list[str]:
+    """Everything that does something, with the current phase first.
+
+    `rows` is the terminal height. The panel is built in sections and the
+    least useful are dropped until it fits, because `render_panel` truncates
+    at the bottom - and the bottom is where "[any key] close" lives, so an
+    overlong panel is one a player cannot work out how to dismiss.
+    """
+    phase = round_state.phase if round_state is not None else None
+    footer = ["", "[any key] close"]
+
+    head: list[str] = ["HELP", ""]
+    if phase is not None:
+        head.append(f"{phase.upper()} - what you can do now")
+        head += [f"  {key:<9} {what}" for key, what in PHASE_HELP[phase]]
+        head.append("")
+
+    board = ["ANY TIME", *(f"  {key:<9} {what}" for key, what in BOARD_HELP)]
+    rules = ["", "HOW IT WORKS", *(f"  {line}" for line in RULES_HELP)]
+
+    # Two rows of padding from the panel border, and never the whole screen.
+    budget = max(8, rows - 2)
+    for sections in ([head, board, rules], [head, board], [head]):
+        lines = [line for section in sections for line in section]
+        if len(lines) + len(footer) <= budget:
+            return [*lines, *footer]
+
+    # Still too tall: keep the phase bindings, which is what was asked for.
+    return [*head[: budget - len(footer)], *footer]
 
 
 def clock(seconds: float) -> str:
@@ -51,7 +131,11 @@ def phase_line(round_state: RoundState | None, me: str, message: str) -> str:
 
 def key_line(round_state: RoundState | None, selected: int | None) -> str:
     """The keys that do something right now, and any pending selection."""
+<<<<<<< HEAD
     common = "arrows/wheel scroll  +/- zoom  [o] borders  [l]egend  [tab] scores  [q]uit"
+=======
+    common = "[?] help  [o]verlay  [l]egend  [tab] scores  [q]uit"
+>>>>>>> 0c2aa45450c6e114a5045b7c1461f9c047fe77df
     if round_state is None:
         return f"  {common} "
 
@@ -61,21 +145,48 @@ def key_line(round_state: RoundState | None, selected: int | None) -> str:
     return f"  {keys}   {common} "
 
 
+# Drawn instead of colour, so the result reads the same on a terminal that
+# has none and in a screenshot pasted into a chat.
+CASE_MARKS: dict[str, str] = {
+    "passed": "ok  ",
+    "wrong": "WRONG",
+    "timeout": "SLOW",
+    "crashed": "CRASH",
+    "flooded": "FLOOD",
+}
+
+
 def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> list[str]:
-    """The submission result, as something that has to be dismissed."""
-    headline = "ACCEPTED" if verdict.perfect else "NOT YET"
-    lines = [headline, "", f"{verdict.passed} of {verdict.total} tests passed"]
-    if verdict.error:
+    """The submission result, case by case, as something to be dismissed.
+
+    Every case gets a line whether it passed or not: "3 of 5" says nothing
+    about which three, and a solution that passes the small cases and times
+    out on the big one is a different problem from one that is simply wrong.
+    """
+    passed = verdict.passed == verdict.total and verdict.total > 0
+    lines = [
+        "ACCEPTED" if passed else "NOT YET",
+        "",
+        f"{verdict.passed} of {verdict.total} tests passed",
+        "",
+    ]
+
+    for case in verdict.cases:
+        mark = CASE_MARKS.get(case.status, "?")
+        timing = f"{case.milliseconds:>5}ms" if case.milliseconds else " " * 7
+        detail = f"  {case.detail}" if case.detail and not case.ok else ""
+        lines.append(f" {case.index}. {mark:<6}{timing}{detail}"[:64])
+
+    if not verdict.cases and verdict.error:
         lines.append(verdict.error)
 
     mine = round_state.player(me) if round_state is not None else None
+    lines.append("")
     if mine is not None:
-        lines.append(f"attempt {mine.submissions}")
-    if verdict.perfect:
-        lines += ["", "everyone else now has a minute"]
-    else:
-        lines += ["", "press [s] to try again"]
-    return [*lines, "", "[any key] back to the board"]
+        best = f"best so far {mine.best.passed}/{mine.best.total}" if mine.best else ""
+        lines.append(f"attempt {mine.submissions}   {best}".strip())
+    lines.append("everyone else now has a minute" if passed else "press [s] to edit and try again")
+    return [*lines, "", "[any key] close   [v] show this again"]
 
 
 def battles_popup(battles: list[BattleReport]) -> list[str]:

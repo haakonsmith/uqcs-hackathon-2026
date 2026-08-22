@@ -41,6 +41,7 @@ from protocol import (
     RoundState,
     ServerEvent,
     SubmitSolution,
+    Verdict,
     terrain,
 )
 
@@ -56,7 +57,14 @@ def _starter(round_state: RoundState | None) -> str:
     lines = [f"# {problem.title}", "#", *(f"# {line}" for line in _wrap(problem.statement)), f"# {problem.signature}"]
     for given, wanted in problem.examples:
         lines.append(f"#   {given!r} -> {wanted!r}")
-    lines += ["", "# While the judge is a placeholder it reads markers, not code:", "#   # solved      all tests pass", "#   # passes N    exactly N pass", ""]
+    lines += [
+        "#",
+        "# Read stdin, write stdout. Your code runs on the server against",
+        "# hidden test cases, in a sandbox with no network and a few seconds",
+        "# of CPU. Only whether each case matched comes back, never what was",
+        "# expected.",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -116,6 +124,9 @@ class App:
     popup: list[str] | None = None
     # Troops the next [m] will send, set with the number keys.
     move_count: int = 1
+    # The last verdict, kept so [v] can bring it back. Dismissing a popup
+    # should not be the only chance to read which cases failed.
+    last_verdict: Verdict | None = None
 
     def tick(self) -> None:
         """A second passed: only the countdown on the phase bar changed."""
@@ -194,6 +205,15 @@ class App:
         if key in ("n", "N"):
             self._cycle(1 if key == "n" else -1)
             return
+        if key == "v":
+            self._show_verdict()
+            return
+        if key in ("?", "/"):
+            # `/` too: `?` is shift+/ and getting the shift wrong should still
+            # open the help rather than do nothing.
+            self.popup = hud.help_popup(self.round, self.term.height)
+            self.dirty = True
+            return
         if await self._handle_phase_key(key):
             return
 
@@ -213,6 +233,10 @@ class App:
             moved = self.view.scroll(dx * self.view.zoom, dy * self.view.zoom, self.world)
         elif key.name and key.name.startswith("MOUSE_"):
             moved = self._handle_mouse(key)
+            # Motion and the wheel are handled above; a press is a move in the
+            # game and has to go to the server, which the sync path cannot do.
+            if key.name == "MOUSE_LEFT":
+                await self._click()
 
         if moved:
             self.refresh_hover()
@@ -227,17 +251,23 @@ class App:
         if key == "f":
             await self._request(FinishPhase())
             return True
+
+        # How many troops the next place or order moves. Both phases, because
+        # both spend troops a handful at a time and the bar offers [1-9] in
+        # each; wiring it to only one made the other silently place one.
+        if phase in ("allocating", "moving") and key.isdigit() and key != "0":
+            self.move_count = int(key)
+            verb = "place" if phase == "allocating" else "send"
+            self._say(f"next {verb}s {self.move_count}")
+            return True
+
         if phase == "submitting" and key == "s":
             await self._submit()
             return True
         if phase == "allocating" and key in (" ", "p"):
-            await self._place(all_of_them=key == "p")
+            await self._place(None if key == "p" else self.move_count)
             return True
         if phase == "moving":
-            if key.isdigit() and key != "0":
-                self.move_count = int(key)
-                self._say(f"next order sends {self.move_count}")
-                return True
             if key == "m":
                 await self._order()
                 return True
@@ -245,6 +275,14 @@ class App:
                 await self._request(CancelOrders())
                 return True
         return False
+
+    def _show_verdict(self) -> None:
+        """Bring the last result back, for a player who dismissed it too fast."""
+        if self.last_verdict is None:
+            self._say("no submission yet this round")
+            return
+        self.popup = hud.verdict_popup(self.last_verdict, self.round, self.me)
+        self.dirty = True
 
     async def _submit(self) -> None:
         """Open the player's editor, then submit whatever they saved."""
@@ -274,23 +312,26 @@ class App:
         self._say(f"submitting {len(code)} bytes ...")
         await self._request(SubmitSolution(code=code))
 
-    async def _place(self, all_of_them: bool) -> None:
+    async def _place(self, count: int | None) -> None:
+        """Put troops down. `count` of None means every one still in hand."""
         territory = self._target_territory()
         if territory is None:
-            self._say("pick a territory with [n] or the mouse first")
+            self._say("click a territory, or pick one with [n]")
             return
+
         mine = self.round.player(self.me) if self.round else None
-        count = mine.troops if all_of_them and mine is not None else 1
-        if count < 1:
+        held = mine.troops if mine is not None else 0
+        wanted = held if count is None else min(count, held)
+        if wanted < 1:
             self._say("no troops left to place")
             return
-        await self._request(PlaceTroops(territory=territory, count=count))
+        await self._request(PlaceTroops(territory=territory, count=wanted))
 
     async def _order(self) -> None:
         """Pick a source, then a neighbour, and queue a march between them."""
         territory = self._target_territory()
         if territory is None:
-            self._say("pick a territory with [n] or the mouse first")
+            self._say("click a territory, or pick one with [n]")
             return
 
         if self.move_from is None:
@@ -299,7 +340,7 @@ class App:
                 return
             self.move_from = territory
             self.selected = None
-            self._say(f"from {territory} - [n] to pick a neighbour, [1-9] for how many, then [m]")
+            self._say(f"from {territory} - now click a neighbour, or [n] then [m]. [1-9] sets how many")
             return
 
         source = self.world.territories[self.move_from]
@@ -310,6 +351,39 @@ class App:
             return
         await self._request(MoveTroops(source=source.id, target=territory, count=count))
         self.move_from = None
+
+    async def _click(self) -> None:
+        """Left click: place here, or march from here to there.
+
+        The same two-step as the keyboard, because it is the same state: the
+        first click on your own ground picks a source, the second names the
+        destination. Clicking is only faster, not different, so a player can
+        switch between mouse and keyboard mid-order.
+        """
+        if self.round is None or self.conn is None:
+            return
+
+        under = self._hovered_territory()
+        if under is None:
+            self._say("nothing there")
+            return
+
+        # `_place` and `_order` read the keyboard pick first, so pointing them
+        # at what was clicked is a matter of setting it.
+        self.selected = under
+        if self.round.phase == "allocating":
+            await self._place(self.move_count)
+        elif self.round.phase == "moving":
+            await self._order()
+        else:
+            self.dirty = True
+
+    def _hovered_territory(self) -> int | None:
+        """The territory under the mouse, ignoring any keyboard pick."""
+        if self.cursor is None:
+            return None
+        cell = self.view.cell_at(self.world, *self.cursor)
+        return cell.territory if cell is not None else None
 
     def _target_territory(self) -> int | None:
         """What a phase key acts on: the keyboard pick, else what is hovered."""
@@ -377,6 +451,7 @@ class App:
         match response:
             case Judged(verdict=verdict, round=round_state):
                 self.round = round_state
+                self.last_verdict = verdict
                 self._say(verdict.summary())
                 self.popup = hud.verdict_popup(verdict, round_state, self.me)
             case Placed(round=round_state, remaining=remaining):
@@ -458,6 +533,10 @@ class App:
         """Fold a server push into the board. Repaints the same way a key does."""
         match event:
             case RoundChanged(round=round_state):
+                if self.round is None or round_state.number != self.round.number:
+                    # A new round is a new problem: last round's verdict is no
+                    # longer "the last one" and [v] must not resurrect it.
+                    self.last_verdict = None
                 if self.round is None or round_state.phase != self.round.phase:
                     # A new phase clears whatever the last one was saying, so
                     # a stale verdict cannot sit over the new instructions.

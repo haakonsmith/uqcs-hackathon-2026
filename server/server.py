@@ -44,8 +44,8 @@ from protocol import (
 )
 from protocol.lobby import Lobby, LobbyPlayer
 from protocol.terrain import World, WorldMap
-from server import combat
-from server.judge import Judge, PlaceholderJudge
+from server import combat, sandbox
+from server.judge import Judge, PlaceholderJudge, SubprocessJudge
 from server.player import Player
 from server.rounds import Round
 from server.world import generate
@@ -392,6 +392,13 @@ class Server:
             max_size=64 * 1024 * 1024,
         ):
             logger.info(f"listening on ws://{host}:{port} - {MIN_PLAYERS} to {self.player_count} players")
+            logger.info(f"judge: {type(self.judge).__name__}")
+            if isinstance(self.judge, SubprocessJudge):
+                # Said out loud at startup, because "sandboxed" means different
+                # things on different hosts and the operator should know which.
+                logger.info(sandbox.ISOLATION.summary())
+                if not sandbox.ISOLATION.blocks_network:
+                    logger.warning("no sandbox wrapper: submitted code can open sockets and write files")
             if host in ("0.0.0.0", "::"):
                 logger.warning(f"bound to {host}: reachable from the network, with no authentication")
             await asyncio.Future()
