@@ -36,21 +36,29 @@ async def startMenu(websocket):
     content = await websocket.recv();
     if (content == "joinGame"):
         players[websocket] = player(websocket);
-        await websocket.send(f"Logging in");
-        await lobby(websocket);
+        if (lobbyCount < playersTarget):
+            await websocket.send(f"Logging in");
+            await lobby(websocket);
+        else:
+            websockets.Close(playersTarget, "Lobby is full, please reconnect");
     else:
         await websocket.send("invalid initation (temp)");
 
 async def lobby(websocket):
     global lobbyCount;
     players[websocket].setStatus("LOBBY");
-    if (lobbyCount >= 4):
-        websockets.Close(4, "Lobby is full, please reconnect");
+    lobbyCount += 1;
+
+    for p in players.values():
+        print(len(players))
+        if (p.getStatus() == "LOBBY"):
+                if (lobbyCount == playersTarget):
+                    await game(websocket);
+                await p.getWebSocket().send(f"In lobby: player count {lobbyCount}/{playersTarget}");
+
+async def game():
     for player in players.values():
-        if (player.getStatus() == "LOBBY"):
-            if (lobbyCount < 4):
-                lobbyCount += 1;
-                await player.getWebSocket().send(f"In lobby: player count {lobbyCount}/{playersTarget}");
+        player.getWebSocket().send(f"Game starting");
 
 async def clients(websocket):
     try:
@@ -69,4 +77,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
