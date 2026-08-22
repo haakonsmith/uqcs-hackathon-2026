@@ -1,13 +1,13 @@
 import asyncio
 import logging
-import world
-from world import World
 from typing import assert_never
 from uuid import UUID, uuid4
 
 import websockets
+import world
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
+from world import World
 
 from protocol import (
     ClientRequest,
@@ -25,14 +25,14 @@ from protocol import (
     dump_frame,
     parse_frame,
 )
-from server.player import Player
 from protocol.terrain import WorldMap
+from server.player import Player
 
 logger = logging.getLogger("Server")
 
+
 @dataclass
 class Server:
-
     connections: set[websockets.ServerConnection]
     game: WorldMap | None
     players: dict[UUID, Player]
@@ -46,7 +46,7 @@ class Server:
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
-        
+
         self.map: World | None = None
         self.player_count = 4
 
@@ -63,9 +63,9 @@ class Server:
                 player_id = uuid4()
                 self.players[player_id] = Player(player_id)
                 self.sessions[ws] = player_id
-                
+
                 await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
-                
+
                 if len(self.players) >= self.player_count and self.map is None:
                     self.createWorld()
                 return Joined(player_id=str(player_id), world=self.map)
@@ -86,7 +86,7 @@ class Server:
 
     async def register_connection(self, websocket: websockets.ServerConnection) -> None:
         logger.info(f"Connection received from {websocket.id}")
-        
+
         if len(self.connections) >= self.player_count:
             await websocket.close(code=1008, reason="lobby full")
             return
@@ -136,6 +136,7 @@ class Server:
         ):
             logger.info("Server started")
             await asyncio.Future()
+
 
 if __name__ == "__main__":
     server = Server()

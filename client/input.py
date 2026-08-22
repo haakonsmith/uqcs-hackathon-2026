@@ -65,11 +65,11 @@ def mouse_tracking(term: blessed.Terminal) -> Generator[None]:
     sequences, so writing the raw escapes instead would enable the terminal but
     leave the decoder handing back `CSI`, `<`, `3`, `5` as separate keystrokes.
     """
-    term._dec_mode_set_enabled(*MOUSE_MODES)
+    term._dec_mode_set_enabled(*MOUSE_MODES)  # pyright: ignore[reportPrivateUsage]
     try:
         yield
     finally:
-        term._dec_mode_set_disabled(*MOUSE_MODES)
+        term._dec_mode_set_disabled(*MOUSE_MODES)  # pyright: ignore[reportPrivateUsage]
 
 
 def wheel_delta(name: str) -> tuple[int, int] | None:
