@@ -54,7 +54,7 @@ from protocol.frames import (
     parse_frame,
 )
 from protocol.lobby import Lobby, LobbyPlayer
-from protocol.rounds import BattleReport, MoveOrder, Phase, PlayerRound, Problem, RoundState, TerritoryUpdate, Verdict
+from protocol.rounds import BattleReport, CaseResult, CaseStatus, MoveOrder, Phase, PlayerRound, Problem, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import TerrainInfo, TerritoryState, World
 
 __all__ = [
@@ -63,6 +63,8 @@ __all__ = [
     "BattleReport",
     "BoardChanged",
     "CancelOrders",
+    "CaseResult",
+    "CaseStatus",
     "ClientRequest",
     "Connection",
     "Echo",

@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Protocol
 
-from protocol.rounds import Problem, Verdict
+from protocol.rounds import CaseResult, CaseStatus, Problem, Verdict
 from server import sandbox
 from server.problems import TestCase, tests_for
 
@@ -67,17 +68,30 @@ class PlaceholderJudge:
 
         lowered = code.lower()
         if "# solved" in lowered:
-            return Verdict(passed=total, total=total, error=note)
+            return _pretend(total, total, note)
 
         marker = "# passes "
         if marker in lowered:
             _, _, rest = lowered.partition(marker)
             digits = rest.split()[0] if rest.split() else ""
             if digits.isdigit():
-                return Verdict(passed=min(int(digits), total), total=total, error=note)
+                return _pretend(min(int(digits), total), total, note)
 
         lines = [line for line in code.splitlines() if line.strip() and not line.strip().startswith("#")]
-        return Verdict(passed=min(len(lines), total), total=total, error=note)
+        return _pretend(min(len(lines), total), total, note)
+
+
+def _pretend(passed: int, total: int, note: str) -> Verdict:
+    """A verdict shaped like a real one, so the client renders it the same."""
+    return Verdict(
+        passed=passed,
+        total=total,
+        error=note,
+        cases=[
+            CaseResult(index=i, status="passed" if i <= passed else "wrong", detail="not executed")
+            for i in range(1, total + 1)
+        ],
+    )
 
 
 class SubprocessJudge:
@@ -116,28 +130,46 @@ class SubprocessJudge:
         # timeout and the player is told the server died. Keep `concurrency`
         # at or above the largest problem's case count and the worst case
         # stays near a single `wall_seconds`.
-        results = await asyncio.gather(*(self._run(code, case) for case in cases))
+        results = await asyncio.gather(*(self._run(code, index, case) for index, case in enumerate(cases, start=1)))
 
-        passed = sum(1 for outcome in results if outcome is None)
-        # Results come back in case order, so the error a player is shown is
-        # always the earliest failing case rather than whichever lost a race.
-        first_error = next((outcome for outcome in results if outcome is not None), None)
-        return Verdict(passed=passed, total=len(cases), error=None if passed == len(cases) else first_error)
+        passed = sum(1 for case in results if case.ok)
+        # Results come back in case order, so the headline is the earliest
+        # failure rather than whichever lost a race.
+        failure = next((case for case in results if not case.ok), None)
+        return Verdict(
+            passed=passed,
+            total=len(cases),
+            error=None if failure is None else f"test {failure.index}: {failure.label()}",
+            cases=list(results),
+        )
 
-    async def _run(self, code: str, case: TestCase) -> str | None:
-        """One test case in its own sandbox. None if it passed, else why not."""
+    async def _run(self, code: str, index: int, case: TestCase) -> CaseResult:
+        """One test case in its own sandbox."""
+        started = time.perf_counter()
         async with self._slots:
             result = await sandbox.run(code, case.stdin, self.limits)
+        elapsed = round((time.perf_counter() - started) * 1000)
+
+        def outcome(status: CaseStatus, detail: str = "") -> CaseResult:
+            return CaseResult(index=index, status=status, detail=detail, milliseconds=elapsed)
 
         if result.timed_out:
-            return f"timed out after {self.limits.wall_seconds:.0f}s"
+            return outcome("timeout", f"killed after {self.limits.wall_seconds:.0f}s")
         if result.exit_code != 0:
-            return _last_line(result.stderr)
+            # Their own traceback, which is exactly what they need to see.
+            return outcome("crashed", _last_line(result.stderr))
         if result.truncated:
-            return "printed too much output"
-        # Only that it was wrong, never what was expected: handing back the
-        # answer would turn one wrong submission into a correct one.
-        return None if compare(case, result.stdout) else "wrong answer"
+            return outcome("flooded", f"over {self.limits.output_bytes // 1024} KB of output")
+        if compare(case, result.stdout):
+            return outcome("passed")
+        # Deliberately no expected value: that would hand over the answer.
+        return outcome("wrong", f"printed {_shorten(result.stdout)}")
+
+
+def _shorten(text: str, width: int = 40) -> str:
+    """One line of a solution's output, for a side-by-side that fits."""
+    flat = " ".join(text.split())
+    return f"{flat[:width]}..." if len(flat) > width else flat or "nothing"
 
 
 def _last_line(text: str) -> str:

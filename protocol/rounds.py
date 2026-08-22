@@ -56,6 +56,40 @@ class Problem:
     examples: list[tuple[str, str]] = field(default_factory=list)
 
 
+type CaseStatus = Literal["passed", "wrong", "timeout", "crashed", "flooded"]
+
+# What each status is called on screen, kept here so both ends agree.
+CASE_LABELS: dict[CaseStatus, str] = {
+    "passed": "passed",
+    "wrong": "wrong answer",
+    "timeout": "timed out",
+    "crashed": "crashed",
+    "flooded": "printed too much",
+}
+
+
+@dataclass(frozen=True)
+class CaseResult:
+    """How one hidden test case went.
+
+    Carries the player's own stderr when their code crashed - that is their
+    traceback and telling them is the whole point - but never the expected
+    output, which would turn one wrong submission into a correct one.
+    """
+
+    index: int
+    status: CaseStatus
+    detail: str = ""
+    milliseconds: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "passed"
+
+    def label(self) -> str:
+        return CASE_LABELS.get(self.status, self.status)
+
+
 @dataclass(frozen=True)
 class Verdict:
     """How one submission did against the hidden tests."""
@@ -63,6 +97,8 @@ class Verdict:
     passed: int
     total: int
     error: str | None = None
+    # One per hidden case, in order. Empty from a judge that does not run them.
+    cases: list[CaseResult] = field(default_factory=list)
 
     @property
     def perfect(self) -> bool:

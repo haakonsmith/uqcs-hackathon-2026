@@ -41,6 +41,7 @@ from protocol import (
     RoundState,
     ServerEvent,
     SubmitSolution,
+    Verdict,
     terrain,
 )
 
@@ -123,6 +124,9 @@ class App:
     popup: list[str] | None = None
     # Troops the next [m] will send, set with the number keys.
     move_count: int = 1
+    # The last verdict, kept so [v] can bring it back. Dismissing a popup
+    # should not be the only chance to read which cases failed.
+    last_verdict: Verdict | None = None
 
     def tick(self) -> None:
         """A second passed: only the countdown on the phase bar changed."""
@@ -201,6 +205,9 @@ class App:
         if key in ("n", "N"):
             self._cycle(1 if key == "n" else -1)
             return
+        if key == "v":
+            self._show_verdict()
+            return
         if await self._handle_phase_key(key):
             return
 
@@ -252,6 +259,14 @@ class App:
                 await self._request(CancelOrders())
                 return True
         return False
+
+    def _show_verdict(self) -> None:
+        """Bring the last result back, for a player who dismissed it too fast."""
+        if self.last_verdict is None:
+            self._say("no submission yet this round")
+            return
+        self.popup = hud.verdict_popup(self.last_verdict, self.round, self.me)
+        self.dirty = True
 
     async def _submit(self) -> None:
         """Open the player's editor, then submit whatever they saved."""
@@ -384,6 +399,7 @@ class App:
         match response:
             case Judged(verdict=verdict, round=round_state):
                 self.round = round_state
+                self.last_verdict = verdict
                 self._say(verdict.summary())
                 self.popup = hud.verdict_popup(verdict, round_state, self.me)
             case Placed(round=round_state, remaining=remaining):
@@ -462,6 +478,10 @@ class App:
         """Fold a server push into the board. Repaints the same way a key does."""
         match event:
             case RoundChanged(round=round_state):
+                if self.round is None or round_state.number != self.round.number:
+                    # A new round is a new problem: last round's verdict is no
+                    # longer "the last one" and [v] must not resurrect it.
+                    self.last_verdict = None
                 if self.round is None or round_state.phase != self.round.phase:
                     # A new phase clears whatever the last one was saying, so
                     # a stale verdict cannot sit over the new instructions.

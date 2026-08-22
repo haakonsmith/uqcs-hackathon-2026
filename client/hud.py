@@ -15,7 +15,7 @@ from protocol.terrain import WorldMap
 
 # What each phase lets you do, in the order you would reach for it.
 KEYS: dict[Phase, str] = {
-    "submitting": "[s]ubmit  [f]inished",
+    "submitting": "[s]ubmit  [v] last result  [f]inished",
     "allocating": "[n]ext territory  [space] place 1  [p] place all  [f]inished",
     "moving": "[n]ext  [m] source then target  [1-9] count  [c]ancel orders  [f]inished",
 }
@@ -61,21 +61,48 @@ def key_line(round_state: RoundState | None, selected: int | None) -> str:
     return f"  {keys}   {common} "
 
 
+# Drawn instead of colour, so the result reads the same on a terminal that
+# has none and in a screenshot pasted into a chat.
+CASE_MARKS: dict[str, str] = {
+    "passed": "ok  ",
+    "wrong": "WRONG",
+    "timeout": "SLOW",
+    "crashed": "CRASH",
+    "flooded": "FLOOD",
+}
+
+
 def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> list[str]:
-    """The submission result, as something that has to be dismissed."""
-    headline = "ACCEPTED" if verdict.perfect else "NOT YET"
-    lines = [headline, "", f"{verdict.passed} of {verdict.total} tests passed"]
-    if verdict.error:
+    """The submission result, case by case, as something to be dismissed.
+
+    Every case gets a line whether it passed or not: "3 of 5" says nothing
+    about which three, and a solution that passes the small cases and times
+    out on the big one is a different problem from one that is simply wrong.
+    """
+    passed = verdict.passed == verdict.total and verdict.total > 0
+    lines = [
+        "ACCEPTED" if passed else "NOT YET",
+        "",
+        f"{verdict.passed} of {verdict.total} tests passed",
+        "",
+    ]
+
+    for case in verdict.cases:
+        mark = CASE_MARKS.get(case.status, "?")
+        timing = f"{case.milliseconds:>5}ms" if case.milliseconds else " " * 7
+        detail = f"  {case.detail}" if case.detail and not case.ok else ""
+        lines.append(f" {case.index}. {mark:<6}{timing}{detail}"[:64])
+
+    if not verdict.cases and verdict.error:
         lines.append(verdict.error)
 
     mine = round_state.player(me) if round_state is not None else None
+    lines.append("")
     if mine is not None:
-        lines.append(f"attempt {mine.submissions}")
-    if verdict.perfect:
-        lines += ["", "everyone else now has a minute"]
-    else:
-        lines += ["", "press [s] to try again"]
-    return [*lines, "", "[any key] back to the board"]
+        best = f"best so far {mine.best.passed}/{mine.best.total}" if mine.best else ""
+        lines.append(f"attempt {mine.submissions}   {best}".strip())
+    lines.append("everyone else now has a minute" if passed else "press [s] to edit and try again")
+    return [*lines, "", "[any key] close   [v] show this again"]
 
 
 def battles_popup(battles: list[BattleReport]) -> list[str]:
