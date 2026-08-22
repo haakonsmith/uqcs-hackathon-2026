@@ -1,22 +1,30 @@
 """A round, as both ends see it.
 
-A round is three phases on a clock the server owns:
+A round is two phases on a clock the server owns:
 
-    submitting -> allocating -> moving -> submitting -> ...
+    submitting -> commanding -> submitting -> ...
 
 `submitting` poses a programming problem and takes solutions, as many attempts
 as a player wants. It ends after `SUBMIT_SECONDS`, or `GRACE_SECONDS` after the
 first perfect solution lands - whoever solves it first sets a deadline for
 everybody else rather than ending the phase from under them.
 
-`allocating` hands out the troops those solutions earned, to place on owned
-territories. `moving` takes marching orders and resolves them all at once when
-the phase ends. Both end early once every player says they are done, so a room
-that is ready does not sit watching a clock.
+`commanding` is a player's whole turn on the board: the troops those solutions
+earned go onto owned territories, and marches are ordered out of them. It ends
+early once every player says they are done, so a room that is ready does not
+sit watching a clock.
 
-Orders are collected and resolved together rather than applied as they arrive,
-because that is what makes two players able to march into the same territory on
-the same turn. Nobody sees anybody else's orders until they land.
+Placing and marching were phases of their own, in that order, and are one
+phase now: the second was only ever the first with the troops already down, so
+a player who had spent their allocation sat through a second clock to move it.
+There is one round of allocation per round of play.
+
+Neither a placement nor an order happens when it is asked for. Both are held as
+a plan and carried out together when the phase ends, placements first so troops
+placed this phase can march out of it. That is what makes two players able to
+march into the same territory on the same turn, and it means nobody sees
+anybody else's reinforcements coming: until the phase ends a placement shows
+only on its own player's screen, as a `(+n)` beside the garrison it will join.
 
 Deadlines travel as `seconds_left` rather than as timestamps: the two ends have
 no common clock, and a countdown that disagrees with the server by the client's
@@ -30,15 +38,16 @@ from typing import Literal
 
 # How long a phase runs before the server moves everyone on regardless.
 SUBMIT_SECONDS = 300.0
-ALLOCATE_SECONDS = 90.0
-MOVE_SECONDS = 120.0
+# One phase where there used to be two, so shorter than the pair it replaces
+# but longer than either: placing and marching are now planned side by side.
+COMMAND_SECONDS = 150.0
 
 # Once somebody solves the problem, how long everyone else gets to finish.
 GRACE_SECONDS = 60.0
 
-type Phase = Literal["submitting", "allocating", "moving"]
+type Phase = Literal["submitting", "commanding"]
 
-PHASE_ORDER: tuple[Phase, ...] = ("submitting", "allocating", "moving")
+PHASE_ORDER: tuple[Phase, ...] = ("submitting", "commanding")
 
 
 @dataclass(frozen=True)
@@ -122,7 +131,7 @@ class PlayerRound:
     name: str
     submissions: int = 0
     best: Verdict | None = None
-    # Earned by the last submitting phase, still waiting to be placed.
+    # Earned by the last submitting phase and not yet promised to a territory.
     troops: int = 0
     # Said they are finished with the phase that is running now.
     done: bool = False
@@ -170,6 +179,18 @@ class MoveOrder:
 
     source: int
     target: int
+    count: int
+
+
+@dataclass(frozen=True)
+class Placement:
+    """Troops of this round's award promised to a territory already owned.
+
+    One per territory rather than one per request: placing twice on the same
+    ground is one reinforcement of `count`, not two the client has to add up.
+    """
+
+    territory: int
     count: int
 
 

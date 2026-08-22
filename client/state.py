@@ -26,17 +26,17 @@ from client.viewport import Viewport
 from protocol import (
     Acknowledged,
     BoardChanged,
-    CancelOrders,
+    CancelPlan,
     ClientRequest,
     Connection,
     FinishPhase,
     GameOver,
     Judged,
+    MoveOrder,
     MovesResolved,
     MoveTroops,
-    Ordered,
-    Placed,
     PlaceTroops,
+    Planned,
     ProtocolError,
     Refused,
     RoundChanged,
@@ -132,11 +132,18 @@ class App:
     # while it is up nothing else reads the keyboard - a verdict that
     # scrolls past in a status bar is a verdict nobody saw.
     popup: list[str] | None = None
-    # Troops the next [m] will send, set with the number keys.
+    # Troops the next place or march will move, set with the number keys.
     move_count: int = 1
     # The last verdict, kept so [v] can bring it back. Dismissing a popup
     # should not be the only chance to read which cases failed.
     last_verdict: Verdict | None = None
+    # The plan for this phase, as the server last confirmed it: troops promised
+    # to each territory, and the marches ordered out of them. Kept rather than
+    # counted locally because a move can be refused, and because both have to
+    # be known to say what a territory still has to send. Drawn as the `(+n)`
+    # beside a garrison, and emptied when the phase carries it out.
+    placements: dict[int, int] = field(default_factory=dict)
+    orders: list[MoveOrder] = field(default_factory=list)
 
     def tick(self) -> None:
         """A second passed: only the countdown on the phase bar changed."""
@@ -154,8 +161,13 @@ class App:
         """What the hover slot says when the mouse is not over the board."""
         if self.selected is not None:
             held = self.world.territories[self.selected]
-            return f"picked {self.selected} ({held.soldiers} soldiers)"
+            return f"picked {self.selected} ({held.soldiers} soldiers{self._placed_suffix(self.selected)})"
         return fallback or "[n] to pick a territory, or use the mouse"
+
+    def _placed_suffix(self, territory_id: int) -> str:
+        """`, +3 placed` for ground with troops promised to it, else nothing."""
+        placed = self.placements.get(territory_id, 0)
+        return f", +{placed} placed" if placed else ""
 
     def refresh_hover(self) -> None:
         """Recompute what the cursor points at.
@@ -189,7 +201,8 @@ class App:
         owner = self.world.territories[cell.territory]
         side = self.factions.side_of.get(owner.id)
         held = self.factions.label(side) if side is not None else "nobody"
-        detail = f"territory {owner.id} held by {held}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
+        soldiers = f"{owner.soldiers} soldiers{self._placed_suffix(owner.id)}"
+        detail = f"territory {owner.id} held by {held}, {soldiers}, {len(owner.neighbours)} neighbours"
         self.hover = f"{where} - {detail}"
         self.highlights[owner.id] = True
         self.dirty = True
@@ -268,27 +281,24 @@ class App:
             await self._request(FinishPhase())
             return True
 
-        # How many troops the next place or order moves. Both phases, because
-        # both spend troops a handful at a time and the bar offers [1-9] in
-        # each; wiring it to only one made the other silently place one.
-        if phase in ("allocating", "moving") and key.isdigit() and key != "0":
-            self.move_count = int(key)
-            verb = "place" if phase == "allocating" else "send"
-            self._say(f"next {verb}s {self.move_count}")
-            return True
-
         if phase == "submitting" and key == "s":
             await self._submit()
             return True
-        if phase == "allocating" and key in (" ", "p"):
-            await self._place(None if key == "p" else self.move_count)
-            return True
-        if phase == "moving":
+        if phase == "commanding":
+            # One count for both halves of the phase: placing and marching move
+            # troops a handful at a time and the bar offers [1-9] for either.
+            if key.isdigit() and key != "0":
+                self.move_count = int(key)
+                self._say(f"next place or march moves {self.move_count}")
+                return True
+            if key in (" ", "p"):
+                await self._place(None if key == "p" else self.move_count)
+                return True
             if key == "m":
                 await self._order()
                 return True
             if key == "c":
-                await self._request(CancelOrders())
+                await self._request(CancelPlan())
                 return True
         return False
 
@@ -329,7 +339,11 @@ class App:
         await self._request(SubmitSolution(code=code))
 
     async def _place(self, count: int | None) -> None:
-        """Put troops down. `count` of None means every one still in hand."""
+        """Promise troops to a territory. `count` of None means all in hand.
+
+        Nothing lands on the board here either: the answer comes back as a
+        `(+n)` on the territory, and the troops arrive when the phase ends.
+        """
         territory = self._target_territory()
         if territory is None:
             self._say("click a territory, or pick one with [n]")
@@ -339,7 +353,7 @@ class App:
         held = mine.troops if mine is not None else 0
         wanted = held if count is None else min(count, held)
         if wanted < 1:
-            self._say("no troops left to place")
+            self._say("no troops left to place - [m] marches what is already there")
             return
         await self._request(PlaceTroops(territory=territory, count=wanted))
 
@@ -360,7 +374,7 @@ class App:
             return
 
         source = self.world.territories[self.move_from]
-        count = min(self.move_count, source.soldiers)
+        count = min(self.move_count, self._sendable(source.id))
         if count < 1:
             self._say(f"territory {source.id} has nothing left to send")
             self.move_from = None
@@ -368,13 +382,26 @@ class App:
         await self._request(MoveTroops(source=source.id, target=territory, count=count))
         self.move_from = None
 
-    async def _click(self) -> None:
-        """Left click: place here, or march from here to there.
+    def _sendable(self, territory_id: int) -> int:
+        """Troops a territory can still be ordered to march out.
 
-        The same two-step as the keyboard, because it is the same state: the
-        first click on your own ground picks a source, the second names the
-        destination. Clicking is only faster, not different, so a player can
-        switch between mouse and keyboard mid-order.
+        The same sum the server checks the order against: the garrison, plus
+        anything placed on it this phase, less whatever is already ordered
+        away. Clamping to the garrison alone would refuse to march troops the
+        player had just placed, which is half the point of one phase for both.
+        """
+        held = self.world.territories[territory_id]
+        promised = sum(order.count for order in self.orders if order.source == territory_id)
+        return held.soldiers + self.placements.get(territory_id, 0) - promised
+
+    async def _click(self) -> None:
+        """Left click: reinforce here, or finish a march that has a source.
+
+        One phase does both, so a click has to mean one of them. It reinforces,
+        which is the commoner move and the one a click meant before the phases
+        were merged; a march is started with [m] and only then does the next
+        click name its destination. Two clicks that mean different things
+        depending on a source picked three keys ago is worse than one key.
         """
         if self.round is None or self.conn is None:
             return
@@ -387,12 +414,12 @@ class App:
         # `_place` and `_order` read the keyboard pick first, so pointing them
         # at what was clicked is a matter of setting it.
         self.selected = under
-        if self.round.phase == "allocating":
-            await self._place(self.move_count)
-        elif self.round.phase == "moving":
+        if self.round.phase != "commanding":
+            self.dirty = True
+        elif self.move_from is not None:
             await self._order()
         else:
-            self.dirty = True
+            await self._place(self.move_count)
 
     def _hovered_territory(self) -> int | None:
         """The territory under the mouse, ignoring any keyboard pick."""
@@ -417,7 +444,7 @@ class App:
         your own ground, which is what both placing and picking a source want.
         """
         mine = self._my_uuid()
-        if self.round is not None and self.round.phase == "moving" and self.move_from is not None:
+        if self.round is not None and self.round.phase == "commanding" and self.move_from is not None:
             source = self.world.territories[self.move_from]
             return sorted(n for n in source.neighbours if self.world.territories[n].owner != mine)
         return sorted(t.id for t in self.world.territories if t.owner == mine)
@@ -447,6 +474,11 @@ class App:
         self.refresh_hover()
         self.dirty = True
 
+    def _forget_plan(self) -> None:
+        """Drop the pending plan, once it has been carried out or overtaken."""
+        self.placements = {}
+        self.orders = []
+
     def _my_uuid(self) -> UUID | None:
         try:
             return UUID(self.me)
@@ -470,13 +502,11 @@ class App:
                 self.last_verdict = verdict
                 self._say(verdict.summary())
                 self.popup = hud.verdict_popup(verdict, round_state, self.me)
-            case Placed(round=round_state, remaining=remaining):
+            case Planned(placements=placements, orders=orders, remaining=remaining, round=round_state):
                 self.round = round_state
-                self._say(f"placed - {remaining} troops left")
-            case Ordered(orders=orders, round=round_state):
-                self.round = round_state
-                total = sum(o.count for o in orders)
-                self._say(f"{len(orders)} orders queued, {total} troops on the march")
+                self.placements = {p.territory: p.count for p in placements}
+                self.orders = list(orders)
+                self._say(self._plan_summary(remaining))
             case Acknowledged(round=round_state):
                 self.round = round_state
                 self._say("waiting for the others")
@@ -484,6 +514,24 @@ class App:
                 self._say(reason)
             case _:
                 self._say(f"unexpected {type(response).__name__}")
+
+    def _plan_summary(self, remaining: int) -> str:
+        """The whole plan in one line, for the phase bar.
+
+        Every move in this phase says the same thing about all of it, rather
+        than each reporting what it did: the interesting number after placing
+        is usually how many troops are left, and after ordering a march it is
+        usually how much is now committed to it.
+        """
+        parts: list[str] = []
+        placed = sum(self.placements.values())
+        if placed:
+            parts.append(f"{placed} placed")
+        if self.orders:
+            marching = sum(order.count for order in self.orders)
+            parts.append(f"{len(self.orders)} order{'s' if len(self.orders) > 1 else ''}, {marching} marching")
+        parts.append(f"{remaining} in hand" if remaining else "nothing left in hand")
+        return "  ".join(parts)
 
     def _say(self, message: str) -> None:
         self.message = message
@@ -524,7 +572,7 @@ class App:
         # Garrisons before the legend: the legend is a solid box and should
         # cover a count that lands under it, rather than have digits printed
         # across its rows.
-        draw_garrisons(frame, self.world, view, self.factions)
+        draw_garrisons(frame, self.world, view, self.factions, self.placements)
         if self.legend:
             draw_legend(frame, view, self.factions)
 
@@ -560,6 +608,7 @@ class App:
                     # a stale verdict cannot sit over the new instructions.
                     self.message = ""
                     self.move_from = None
+                    self._forget_plan()
                 self.round = round_state
                 self.dirty = True
             case BoardChanged(updates=updates):
@@ -567,6 +616,10 @@ class App:
                     territory = self.world.territories[update.id]
                     territory.owner = UUID(update.owner) if update.owner else None
                     territory.soldiers = update.soldiers
+                # The only delta the server sends is the one a phase resolving
+                # produces, and it already counts in everything that was
+                # promised. Keeping the `(+n)` would show those troops twice.
+                self._forget_plan()
                 self.refresh_hover()
                 self.dirty = True
             case MovesResolved(battles=battles):

@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosedError
 from protocol import (
     Acknowledged,
     BoardChanged,
-    CancelOrders,
+    CancelPlan,
     ClientRequest,
     Echo,
     Echoed,
@@ -27,9 +27,8 @@ from protocol import (
     LobbyChanged,
     MovesResolved,
     MoveTroops,
-    Ordered,
-    Placed,
     PlaceTroops,
+    Planned,
     ReadySet,
     Refused,
     ReqFrame,
@@ -183,10 +182,11 @@ class Server:
                 except combat.IllegalMove as error:
                     return Refused(reason=str(error))
 
-                logger.info(f"{_label(player)} placed {count} on territory {territory}, {remaining} left")
-                await self.broadcast(BoardChanged(updates=self.round.updates((territory,))))
-                await self.broadcast(RoundChanged(round=self.round.state()))
-                return Placed(round=self.round.state(), remaining=remaining)
+                logger.info(f"{_label(player)} promised {count} to territory {territory}, {remaining} left")
+                # Nothing goes out to the room, not even the round state: a
+                # placement is part of a plan until the phase ends, and the
+                # troop count in that state would say how much of one is left.
+                return self._planned(self.round, player.id)
 
             case MoveTroops(source=source, target=target, count=count):
                 player = self._player(ws)
@@ -198,16 +198,17 @@ class Server:
                     return Refused(reason=str(error))
 
                 logger.info(f"{_label(player)} ordered {count} from {source} to {target} ({len(orders)} orders)")
-                # Deliberately not broadcast: orders stay secret until they
-                # land, or marching into somebody is never a surprise.
-                return Ordered(orders=orders, round=self.round.state())
+                # Deliberately not broadcast either: orders stay secret until
+                # they land, or marching into somebody is never a surprise.
+                return self._planned(self.round, player.id)
 
-            case CancelOrders():
+            case CancelPlan():
                 player = self._player(ws)
                 if player is None or self.round is None:
                     return Refused(reason="no game in progress")
-                logger.info(f"{_label(player)} tore up their orders")
-                return Ordered(orders=self.round.cancel_orders(player.id), round=self.round.state())
+                self.round.cancel_plan(player.id)
+                logger.info(f"{_label(player)} tore up their plan")
+                return self._planned(self.round, player.id)
 
             case FinishPhase():
                 player = self._player(ws)
@@ -301,6 +302,21 @@ class Server:
         logger.info(f"{name} holds the whole board - game over")
         self.round = None
         await self.broadcast(GameOver(winner=str(winner_id), name=name))
+
+    def _planned(self, round: Round, player_id: UUID) -> Planned:
+        """One player's whole plan for the phase, as the answer to a move.
+
+        Every move in a commanding phase answers with all of it rather than
+        with what it changed, because placing and marching draw on the same
+        troops: an answer naming only one of them leaves the client to work out
+        the other, and the two would disagree the moment a move was refused.
+        """
+        return Planned(
+            placements=round.placements_for(player_id),
+            orders=round.orders_for(player_id),
+            remaining=round.troops_left(player_id),
+            round=round.state(),
+        )
 
     def _player(self, ws: websockets.ServerConnection) -> Player | None:
         player_id = self.sessions.get(ws)

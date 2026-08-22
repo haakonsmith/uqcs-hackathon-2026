@@ -63,11 +63,11 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("o", "border strength"),
     ("l", "this legend"),
     ("n/N", "pick a territory"),
-    ("space", "place one troop"),
+    ("space", "place troops here"),
     ("p", "place all troops"),
-    ("1-9", "troops per march"),
-    ("m", "source, then target"),
-    ("c", "cancel orders"),
+    ("1-9", "how many at a time"),
+    ("m", "march from here"),
+    ("c", "clear your plan"),
     ("s", "write a solution"),
     ("f", "finish the phase"),
     ("tab", "scoreboard"),
@@ -222,11 +222,23 @@ def garrison_anchor(world: terrain.WorldMap, territory: terrain.Territory) -> tu
     return min(territory.cells, key=lambda cell: (cell[0] - centre_x) ** 2 + (cell[1] - centre_y) ** 2)
 
 
-def draw_garrisons(screen: Screen, world: terrain.WorldMap, view: Viewport, factions: Factions) -> None:
+def draw_garrisons(
+    screen: Screen,
+    world: terrain.WorldMap,
+    view: Viewport,
+    factions: Factions,
+    placements: dict[int, int] | None = None,
+) -> None:
     """How many soldiers sit on each visible territory, over its middle.
 
     Composed after the terrain, the way the legend is, so the map stays a
     plain grid of cells and no row has to leave room for text midway along it.
+
+    `placements` is troops this player has promised to a territory but not yet
+    put on the board, drawn as a `(+n)` after the count. Separate from the count
+    rather than added into it because the two are not the same thing: the count
+    is what would defend the ground if the phase ended now, and the `(+n)` is
+    what a plan the player can still tear up would add to it.
 
     Each count carries its holder's colour as a background rather than being
     bare text, so it reads as a chip on the map instead of a number floating
@@ -239,6 +251,7 @@ def draw_garrisons(screen: Screen, world: terrain.WorldMap, view: Viewport, fact
     """
     board_width = view.drawn_cols * CELL_WIDTH
     taken: set[tuple[int, int]] = set()
+    pending = placements or {}
 
     for territory in world.territories:
         # Unclaimed ground has no garrison to report, only a colour.
@@ -253,7 +266,8 @@ def draw_garrisons(screen: Screen, world: terrain.WorldMap, view: Viewport, fact
         if not view.covers(y):
             continue
 
-        label = str(territory.soldiers)
+        placed = pending.get(territory.id, 0)
+        label = f"{territory.soldiers}(+{placed})" if placed else str(territory.soldiers)
         # Centred on the cell, which is two columns wide; a count wider than
         # that spreads either side of it rather than hanging off to the right.
         left = x + (CELL_WIDTH - len(label)) // 2
