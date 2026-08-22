@@ -9,16 +9,9 @@ from __future__ import annotations
 
 import math
 
-from client.screen import Color, Screen
+from client.palette import PANEL_BG, PANEL_FG
+from client.screen import Screen
 from protocol.rounds import BattleReport, Phase, PlayerRound, RoundState, Verdict
-
-# White on a neutral grey. Grey rather than a colour because a panel is not
-# part of the map and should not look like a faction holding it, and because
-# it sits over terrain of every hue - a coloured panel reads as belonging to
-# whatever it happens to be covering. 13:1 against white, so the text stays
-# comfortable at any terminal brightness.
-PANEL_FG: Color = (255, 255, 255)
-PANEL_BG: Color = (48, 48, 48)
 
 # The short version, for the bar under the board. Both input methods get a
 # mention: the mouse is faster, the keyboard is the one that always works on
@@ -279,11 +272,6 @@ def reveal_hold(battles: list[BattleReport]) -> float:
 def hold_notice(seconds: float) -> str:
     """Replaces a popup's dismiss hint for as long as the hint would be a lie."""
     return f"[any key] in {math.ceil(seconds)}s"
-
-
-def where(world: WorldMap, view: Viewport) -> str:
-    """The slice of board on screen, so scrolling has a read-out."""
-    return f"[{view.x},{view.y}] {view.span_x}x{view.span_y} of {world.width}x{world.height} @{view.zoom}x"
 
 
 def scoreboard(round_state: RoundState | None, me: str) -> list[str]:

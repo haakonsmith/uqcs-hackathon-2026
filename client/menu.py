@@ -22,7 +22,7 @@ from typing import Literal, assert_never
 import blessed
 
 from client.input import AppEvent, KeyPress, Received, Resized
-from client.palette import Color
+from client.palette import PANEL_BG, PANEL_FG, SELECTED_BG, SELECTED_FG, Color
 from client.render import CELL_WIDTH
 from protocol.terrain import Terrain
 
@@ -164,6 +164,16 @@ def button_geometry(index: int, width: int, height: int) -> tuple[int, int, int]
     return max(0, (width - length) // 2), height // 2 + 4, length
 
 
+def _label(term: blessed.Terminal, text: str, fg: Color, bg: Color) -> str:
+    """Bold text in explicit colours, for buttons, panels and the footer.
+
+    RGB rather than the terminal's named colours: those are whatever the
+    user's theme says they are, so the same menu came out a different blue on
+    every machine and matched nothing else the game draws.
+    """
+    return term.color_rgb(*fg) + term.on_color_rgb(*bg) + term.bold + text + term.normal
+
+
 def _block(term: blessed.Terminal, color: Color, glyph: str = "██") -> str:
     """A run of solid colour.
 
@@ -249,12 +259,12 @@ def _buttons(term: blessed.Terminal) -> str:
         if y >= height:
             continue
         if index == state.selected:
-            output.append(term.move_xy(x, y) + term.bold_black_on_white(f"[>{item.label}<]"))
+            output.append(term.move_xy(x, y) + _label(term, f"[>{item.label}<]", SELECTED_FG, SELECTED_BG))
         else:
-            output.append(term.move_xy(x, y) + term.bold_white_on_blue(f"[ {item.label} ]"))
+            output.append(term.move_xy(x, y) + _label(term, f"[ {item.label} ]", PANEL_FG, PANEL_BG))
 
     footer = f" {state.username} @ {state.address}   arrows/mouse select  [enter] choose  [q] quit "
-    output.append(term.move_xy(0, height - 1) + term.bold_white_on_blue(footer[:width].ljust(width)))
+    output.append(term.move_xy(0, height - 1) + _label(term, footer[:width].ljust(width), PANEL_FG, PANEL_BG))
     return "".join(output)
 
 
@@ -278,7 +288,7 @@ def _panel(term: blessed.Terminal, lines: Sequence[str]) -> str:
         y = top + index
         if y >= term.height:
             break
-        output.append(term.move_xy(left, y) + term.bold_white_on_blue(text.center(width)[:width]))
+        output.append(term.move_xy(left, y) + _label(term, text.center(width)[:width], PANEL_FG, PANEL_BG))
     return "".join(output)
 
 
