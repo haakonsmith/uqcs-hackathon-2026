@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import colorsys
 from collections import Counter
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from client.palette import Color, Factions, blend
@@ -32,6 +33,12 @@ _HUE_STEP = 0.6180339887498949
 # one to see at a glance who holds what.
 BORDER_ALPHA = 0.1
 BORDER_ALPHA_BOLD = 0.5
+
+# The least a frontier cell must differ in brightness from the ground under it.
+# Hue alone is not a border on a greyscale terminal, to a colour-blind player,
+# or once a 256-colour terminal has rounded both to the same entry.
+BORDER_CONTRAST = 1.25
+BORDER_CONTRAST_BOLD = 1.7
 
 # The same for a hovered territory, which is filled in its holder's colour so
 # that pointing at ground says whose it is. Thinner than the frontier, so the
@@ -154,6 +161,39 @@ def frontier_side(world: terrain.WorldMap, factions: Factions, cell: terrain.Cel
     return None
 
 
+@lru_cache(maxsize=2048)
+def frontier_color(side: Color, ground: Color, alpha: float, target: float) -> Color:
+    """The side's colour laid over the ground, made sure to be visible on it.
+
+    Blending alone is not enough. A border is only a border if the cell looks
+    different from the one beside it, and a colour that differs in hue but not
+    in brightness does not: crimson over forest comes out at a contrast ratio
+    of 1.00, identical to the ground in every way except a hue that greyscale,
+    a colour-blind eye and a quantising terminal all discard.
+
+    So after blending, the result is pushed towards white or black - whichever
+    the ground is further from - until it clears `target`. The border keeps the
+    side's hue for everyone who can see hue, and gains a brightness step for
+    everyone who cannot.
+
+    Cached because a board has only a handful of distinct side-and-ground
+    pairs, and the search below would otherwise run for every frontier cell
+    of every frame.
+    """
+    edge = blend(side, ground, alpha)
+    if contrast(edge, ground) >= target:
+        return edge
+
+    # Away from the ground, so a border on dark forest lightens and one on
+    # sand darkens; going the other way would collide with the terrain again.
+    toward: Color = (255, 255, 255) if _relative_luminance(ground) < 0.5 else (0, 0, 0)
+    for step in (0.15, 0.3, 0.45, 0.6, 0.75):
+        lifted = blend(toward, edge, step)
+        if contrast(lifted, ground) >= target:
+            return lifted
+    return blend(toward, edge, 0.75)
+
+
 def board_colors(
     world: terrain.WorldMap,
     view: Viewport,
@@ -167,6 +207,7 @@ def board_colors(
     it: two grids of tuples diff cheaply, two strings of escapes do not.
     """
     border_alpha = BORDER_ALPHA_BOLD if bold_borders else BORDER_ALPHA
+    border_contrast = BORDER_CONTRAST_BOLD if bold_borders else BORDER_CONTRAST
     grid: list[list[Color]] = []
     for row in world.grid[view.y : view.y + view.span_y : view.zoom]:
         colors: list[Color] = []
@@ -174,7 +215,7 @@ def board_colors(
             color = cell_color(cell, highlights, factions)
             side = frontier_side(world, factions, cell, view.zoom)
             if side is not None:
-                color = blend(factions.colors[side], color, border_alpha)
+                color = frontier_color(factions.colors[side], color, border_alpha, border_contrast)
             colors.append(color)
         grid.append(colors)
     return grid
@@ -196,15 +237,33 @@ def draw_board(
                 screen.set(x * CELL_WIDTH + column, y, (" ", None, color, False))
 
 
-def _readable_on(background: Color) -> Color:
-    """Black or white, whichever the eye can pick out against `background`.
+def _relative_luminance(color: Color) -> float:
+    """Luminance as WCAG defines it, for contrast ratios."""
 
-    Rec. 601 luma rather than a plain average: green carries most of what the
-    eye reads as brightness and blue almost none, so averaging would call the
-    allied blue light and print black on it.
+    def channel(value: int) -> float:
+        v = value / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (channel(v) for v in color)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def contrast(a: Color, b: Color) -> float:
+    """WCAG contrast ratio, 1.0 for identical and 21.0 for black on white."""
+    lighter, darker = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _readable_on(background: Color) -> Color:
+    """Black or white, whichever the eye can actually pick out against this.
+
+    Measured rather than guessed at. A luminance threshold picked white above
+    some cutoff and black below it, which is right for most colours and wrong
+    near the middle: plum and rust both sat just the wrong side of it and got
+    the worse of the two, 3.3 and 3.5 against the 5.3 and 5.0 on offer.
+    Comparing the two ratios cannot get that wrong, and costs no more.
     """
-    luma = 0.299 * background[0] + 0.587 * background[1] + 0.114 * background[2]
-    return GARRISON_DARK if luma > 140 else GARRISON_LIGHT
+    return max(GARRISON_DARK, GARRISON_LIGHT, key=lambda ink: contrast(ink, background))
 
 
 def garrison_anchor(world: terrain.WorldMap, territory: terrain.Territory) -> tuple[int, int]:

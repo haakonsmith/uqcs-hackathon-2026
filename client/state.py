@@ -220,8 +220,9 @@ class App:
         side = self.factions.side_of.get(owner.id)
         held = self.factions.label(side) if side is not None else "nobody"
         soldiers = f"{owner.soldiers} soldiers{self._placed_suffix(owner.id)}"
-        detail = f"territory {owner.id} held by {held}, {soldiers}, {len(owner.neighbours)} neighbours"
-        self.hover = f"{where} - {detail}"
+        # Who holds it and how strongly. The neighbour count was here too and
+        # answered a question nobody asks while deciding a move.
+        self.hover = f"{where} - {held}, {soldiers}"
         self.highlights[owner.id] = True
         self.dirty = True
 
@@ -652,7 +653,7 @@ class App:
         # plus the keys that work right now.
         bars = [
             hud.phase_line(self.round, self.me, self.message),
-            f" {hud.where(self.world, view)}  {self.hover}" + hud.key_line(self.round, self.move_from),
+            f" {self.hover}" + hud.key_line(self.round, self.move_from),
         ]
         for offset, text in enumerate(bars):
             frame.row(view.drawn_rows + offset, text)
@@ -675,6 +676,11 @@ class App:
                     # A new round is a new problem: last round's verdict is no
                     # longer "the last one" and [v] must not resurrect it.
                     self.last_verdict = None
+                    # And the draft still holds the last problem's statement
+                    # and the answer to it, so [s] would open the wrong
+                    # instructions over a solution to something else.
+                    if self.draft is not None:
+                        self.draft.reset(_starter(round_state))
                 if self.round is None or round_state.phase != self.round.phase:
                     # A new phase clears whatever the last one was saying, so
                     # a stale verdict cannot sit over the new instructions.

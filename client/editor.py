@@ -119,6 +119,20 @@ class Draft:
         if initial:
             _ = self.path.write_text(initial)
 
+    def reset(self, initial: str = "") -> None:
+        """Put a fresh problem in the draft, keeping the same file.
+
+        Rewritten rather than replaced. The windowed path hands this path to an
+        application that goes on holding it for the rest of the session, so a
+        new file would leave that application editing the old one, and deleting
+        this one would pull it out from under them. Writing through the same
+        path is also what lets an editor notice the change and offer to reload.
+        """
+        try:
+            _ = self.path.write_text(initial)
+        except OSError as error:
+            logger.warning("could not reset the draft: %s", error)
+
     def read(self) -> str:
         try:
             return self.path.read_text()

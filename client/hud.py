@@ -10,14 +10,15 @@ from __future__ import annotations
 import math
 
 from client.screen import Color, Screen
-from client.viewport import Viewport
-from protocol.rounds import BattleReport, Phase, RoundState, Verdict
-from protocol.terrain import WorldMap
+from protocol.rounds import BattleReport, Phase, PlayerRound, RoundState, Verdict
 
-# White on the same blue the menu panels use, so an overlay reads as one
-# thing wherever it appears.
+# White on a neutral grey. Grey rather than a colour because a panel is not
+# part of the map and should not look like a faction holding it, and because
+# it sits over terrain of every hue - a coloured panel reads as belonging to
+# whatever it happens to be covering. 13:1 against white, so the text stays
+# comfortable at any terminal brightness.
 PANEL_FG: Color = (255, 255, 255)
-PANEL_BG: Color = (28, 62, 122)
+PANEL_BG: Color = (48, 48, 48)
 
 # The short version, for the bar under the board. Both input methods get a
 # mention: the mouse is faster, the keyboard is the one that always works on
@@ -50,27 +51,33 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
 
 BOARD_HELP: list[tuple[str, str]] = [
     ("arrows", "scroll the board"),
-    ("wheel", "scroll, shift+wheel sideways"),
+    ("wheel", "scroll, shift+wheel for sideways"),
     ("+ -", "zoom in and out"),
-    ("[o]", "ownership overlay"),
-    ("[l]", "legend"),
+    ("[o]", "faint or bold borders"),
+    ("[l]", "show or hide the legend"),
     ("[tab]", "scoreboard"),
+    ("[?]", "this panel"),
     ("[q]", "quit to the menu"),
 ]
 
+# Short lines that each say one thing. The old version was a paragraph wrapped
+# to the panel, which is the hardest shape to find an answer in.
 RULES_HELP: list[str] = [
-    "A round is submit, then command.",
-    "Troops earned = 3 + territories/3 + up to 5 for your",
-    "solution, +3 for solving first.",
-    "Place them on your own ground to reinforce it, or on",
-    "ground touching yours to assault it, and march out of",
-    "your own - all in the one phase. Both are secret,",
-    "shown to you as (+n) beside a garrison, and both",
-    "happen when the phase ends: troops land first, so what",
-    "you place can march the same turn. The biggest stack",
-    "in a territory takes it, losing as many troops as the",
-    "next biggest. A tie wipes both out and leaves it",
-    "unowned.",
+    "Each round: solve a problem, then command your troops.",
+    "",
+    "Solving earns troops - 3, plus one per 3 territories,",
+    "plus up to 5 for how much of the problem you got, plus",
+    "3 for being first to solve it.",
+    "",
+    "Place troops and order marches in the same phase. Both",
+    "are secret until it ends, and shown to you as (+n) on",
+    "a garrison until then.",
+    "",
+    "When the phase ends, troops land first - so what you",
+    "placed can march the same turn. Where marches meet, the",
+    "biggest stack takes the territory and loses as many",
+    "troops as the second biggest. A tie wipes both out and",
+    "leaves the ground unowned.",
 ]
 
 
@@ -78,21 +85,19 @@ def help_popup(round_state: RoundState | None, rows: int = 999) -> list[str]:
     """Everything that does something, with the current phase first.
 
     `rows` is the terminal height. The panel is built in sections and the
-    least useful are dropped until it fits, because `draw_panel` truncates
-    at the bottom - and the bottom is where "[any key] close" lives, so an
+    least useful are dropped until it fits, because `draw_panel` truncates at
+    the bottom - and the bottom is where "[any key] close" lives, so an
     overlong panel is one a player cannot work out how to dismiss.
     """
     phase = round_state.phase if round_state is not None else None
     footer = ["", "[any key] close"]
 
-    head: list[str] = ["HELP", ""]
+    head: list[str] = []
     if phase is not None:
-        head.append(f"{phase.upper()} - what you can do now")
-        head += [f"  {key:<9} {what}" for key, what in PHASE_HELP[phase]]
-        head.append("")
+        head += [f"{phase.upper()} - what you can do now", "", *_bindings(PHASE_HELP[phase]), ""]
 
-    board = ["ANY TIME", *(f"  {key:<9} {what}" for key, what in BOARD_HELP)]
-    rules = ["", "HOW IT WORKS", *(f"  {line}" for line in RULES_HELP)]
+    board = ["ANY TIME", "", *_bindings(BOARD_HELP)]
+    rules = ["", "HOW A ROUND WORKS", "", *RULES_HELP]
 
     # Two rows of padding from the panel border, and never the whole screen.
     budget = max(8, rows - 2)
@@ -105,37 +110,83 @@ def help_popup(round_state: RoundState | None, rows: int = 999) -> list[str]:
     return [*head[: budget - len(footer)], *footer]
 
 
+def _bindings(rows: list[tuple[str, str]]) -> list[str]:
+    """Key and meaning in two columns, the keys all the same width."""
+    width = max(len(key) for key, _ in rows)
+    return [f"  {key:<{width}}   {what}" for key, what in rows]
+
+
+# Below this the clock is the pressing thing, so the bar starts naming who
+# everyone is waiting for. Earlier in a phase it is just noise.
+GRACE_HINT = 60.0
+
+
 def clock(seconds: float) -> str:
     minutes, rest = divmod(max(0, int(seconds)), 60)
     return f"{minutes}:{rest:02d}"
 
 
 def phase_line(round_state: RoundState | None, me: str, message: str) -> str:
-    """Round, phase, countdown, then whatever last happened to this player."""
+    """One sentence saying what is happening and what this player should do.
+
+    A sentence rather than a row of fields. The bar used to read
+
+        round 2  COMMANDING  1:30  5 troops to place  waiting on 2
+
+    which is six things to parse to answer the one question a player has,
+    which is "what now". The phase name, the count and the clock are all still
+    here; they are just arranged so reading them in order is a sentence.
+    """
     if round_state is None:
         return " waiting for the server ..."
 
     mine = round_state.player(me)
-    parts = [f"round {round_state.number}", round_state.phase.upper(), clock(round_state.seconds_left)]
+    sentence = f"Round {round_state.number}: {_doing(round_state, mine)}"
 
-    if round_state.phase == "submitting" and round_state.problem is not None:
-        parts.append(round_state.problem.title)
+    left = clock(round_state.seconds_left)
+    if mine is not None and mine.done:
+        sentence += f", you are done - {_blocking(round_state, me)}"
+    elif (waiting := _blocking(round_state, me)) and round_state.seconds_left < GRACE_HINT:
+        sentence += f" - {left} left, {waiting}"
+    else:
+        sentence += f" - {left} left"
+
+    return f" {sentence}   {message}" if message else f" {sentence}"
+
+
+def _doing(round_state: RoundState, mine: PlayerRound | None) -> str:
+    """The part of the sentence that says what this phase is for."""
+    if round_state.phase == "submitting":
+        title = round_state.problem.title if round_state.problem is not None else "the problem"
         if mine is not None and mine.best is not None:
-            parts.append(f"best {mine.best.passed}/{mine.best.total}")
-    elif round_state.phase == "commanding" and mine is not None and mine.troops:
-        parts.append(f"{mine.troops} troops to place")
+            if mine.best.perfect:
+                return f"you solved {title}"
+            return f"solve {title}, best so far {mine.best.passed}/{mine.best.total}"
+        return f"solve {title}"
 
-    waiting = round_state.waiting_on()
-    if waiting:
-        parts.append(f"waiting on {waiting}")
+    if mine is not None and mine.troops:
+        return f"place {mine.troops} troops and order marches"
+    return "order marches"
 
-    line = "  ".join(parts)
-    return f" {line}   {message}" if message else f" {line}"
+
+def _blocking(round_state: RoundState, me: str) -> str:
+    """Who the phase is waiting on, named while there are few enough to name."""
+    others = [p.name for p in round_state.players if not p.done and p.player_id != me]
+    if not others:
+        return ""
+    if len(others) == 1:
+        return f"waiting on {others[0]}"
+    if len(others) == 2:
+        return f"waiting on {others[0]} and {others[1]}"
+    return f"waiting on {len(others)} players"
 
 
 def key_line(round_state: RoundState | None, selected: int | None) -> str:
     """The keys that do something right now, and any pending selection."""
-    common = "arrows/wheel scroll  +/- zoom  [o] borders  [l]egend  [tab] scores  [q]uit"
+    # Only what this phase answers, plus the way to everything else. The rest
+    # used to be listed here and ran to 200 characters, which no terminal
+    # showed in full and which the [?] panel now covers properly.
+    common = "[?] help  [q]uit"
     if round_state is None:
         return f"  {common} "
 
@@ -240,27 +291,34 @@ def scoreboard(round_state: RoundState | None, me: str) -> list[str]:
     if round_state is None:
         return ["no round yet"]
 
-    rows = [f"=== ROUND {round_state.number} - {round_state.phase.upper()} ===", ""]
+    rows = [f"ROUND {round_state.number} - {round_state.phase.upper()}", ""]
+    rows.append(f"{'player':<16} {'best':<24} {'troops':>6}  {'phase':<7}")
     for player in round_state.players:
         name = f"{player.name} (you)" if player.player_id == me else player.name
         best = player.best.summary() if player.best is not None else "no submission"
-        mark = "done" if player.done else "..."
-        rows.append(f"{name[:16]:<16} {best:<22} {player.troops:>2} troops  {mark}")
+        mark = "done" if player.done else "thinking"
+        rows.append(f"{name[:16]:<16} {best[:24]:<24} {player.troops:>6}  {mark:<7}")
     return rows
 
 
 def draw_panel(screen: Screen, lines: list[str]) -> None:
-    """A boxed overlay in the middle of the screen, for popups and scores."""
+    """A boxed overlay in the middle of the screen, for popups and scores.
+
+    Every line is left-aligned. Centring each line independently is what made
+    a list of keys look ragged: each row found its own middle, so a column
+    that lined up in the text did not line up on screen.
+    """
     if not lines:
         return
 
-    width = min(max(len(line) for line in lines) + 4, screen.width)
+    content = min(max((len(line) for line in lines), default=0), screen.width - 4)
+    width = content + 4
     rows = ["", *lines, ""]
     top = max(0, (screen.height - len(rows)) // 2)
     left = max(0, (screen.width - width) // 2)
 
-    for index, text in enumerate(rows):
+    for index, line in enumerate(rows):
         y = top + index
         if y >= screen.height:
             break
-        screen.text(left, y, text.center(width)[:width], fg=PANEL_FG, bg=PANEL_BG, bold=True)
+        screen.text(left, y, f"  {line.ljust(content)}  "[:width], fg=PANEL_FG, bg=PANEL_BG, bold=True)
