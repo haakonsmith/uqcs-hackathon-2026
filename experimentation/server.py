@@ -2,52 +2,80 @@ import asyncio
 import random
 import time
 
-from websockets.asyncio.server import ServerConnection, serve
+from websockets.asyncio.server import serve
+from dataclasses import dataclass
+import websockets
+import player
+from player import player
 
-gameState = {}
-player = {}
-world = {}
-territory = {}
+gameState = {};
+players = {};
+world = {};
+territory = {};
+playersTarget = 4;
+lobbyCount = 0;
 
-
-def createPlayer(websocket: ServerConnection):
-    playerId = str(websocket.id)  # uuid??
-
+def createWorld():
     return {
-        "userID": playerId,  # idk what player values to add except userID as primary
-        "connectionTime": time.time(),
-        "lastSeen": time.time(),  # for client heartbeat
-        "name": None,  # no name yet (idk if we will ask names)
-        "status": "Unknown",
-        "territory": None,
-        "points": 0,
-        "currentAction": {"mouseHover": False, "mousePos": (0, 0), "mouseTile": (0, 0)},
+        "numTerritories": 0
     }
 
+class territory:
+    def __init__(self, name, id):
+        self.name = name;
+        self.id = id;
 
-def createTerritory(name, id):  # no arguments for now
+def createTerritory(name, id): #no arguments for now 
     return {
         "name": name,
         "id": id,
-        "colour": random.randint(1, 15),  # maybe int represents colour, like 1=blue
+        "colour": random.randint(1, 15), #maybe int represents colour, like 1=blue (random for now)
     }
 
+async def startMenu(websocket):
+    content = await websocket.recv();
+    if (content == "joinGame"):
+        players[websocket] = player(websocket);
+        if (lobbyCount < playersTarget):
+            await websocket.send(f"Logging in");
+            await lobby(websocket);
+        else:
+            websocket.close(playersTarget, "Lobby is full, please reconnect");
+    else:
+        await websocket.send("invalid initation (temp)");
 
-async def game(websocket):
-    player[websocket] = createPlayer(websocket)
+async def lobby(websocket):
+    global lobbyCount;
+    players[websocket].setStatus("LOBBY");
+    lobbyCount += 1;
+    print(len(players))
+    for p in players.values():
+        if (p.getStatus() == "LOBBY"):
+                if (lobbyCount == playersTarget):
+                    await game(websocket);
+                await p.getWebSocket().send(f"LOBBY: {lobbyCount}/{playersTarget}");
 
+async def game():
+    for player in players.values():
+        player.getWebSocket().send(f"Game starting");
 
-# name = await websocket.recv();
-# print(f"<<< {name}")
+async def clients(websocket):
+    try:
+        await startMenu(websocket)
+        await websocket.wait_closed()
 
-# greeting = f"Hello {name}!"
+    except websockets.exceptions.ConnectionClosed:
+        print("disconnected")
 
-# await websocket.send(greeting)
-# print(f">>> {greeting}")
-
+    finally:
+        if websocket in players:
+            global lobbyCount
+            if players[websocket].getStatus() == "LOBBY":
+                lobbyCount -= 1
+            del players[websocket]
 
 async def main():
-    server = await serve(game, "localhost", 8765)
+    server = await serve(clients, "localhost", 8765)
     await server.serve_forever()
 
 
