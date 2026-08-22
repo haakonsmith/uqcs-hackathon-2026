@@ -18,13 +18,15 @@ from protocol.actions import (
     ClientRequest,
     Echo,
     Echoed,
+    GameStarted,
     Join,
     Joined,
     JoinRejected,
-    PlayerJoined,
-    PlayerLeft,
+    LobbyChanged,
+    ReadySet,
     ServerEvent,
     ServerResponse,
+    SetReady,
 )
 from protocol.connection import Connection
 from protocol.core import ProtocolError, Request, response_types
@@ -37,6 +39,7 @@ from protocol.frames import (
     dump_frame,
     parse_frame,
 )
+from protocol.lobby import Lobby, LobbyPlayer
 from protocol.terrain import TerrainInfo, TerritoryState, World
 
 __all__ = [
@@ -47,17 +50,21 @@ __all__ = [
     "Echoed",
     "EvtFrame",
     "Frame",
+    "GameStarted",
     "Join",
     "JoinRejected",
     "Joined",
-    "PlayerJoined",
-    "PlayerLeft",
+    "Lobby",
+    "LobbyChanged",
+    "LobbyPlayer",
     "ProtocolError",
+    "ReadySet",
     "ReqFrame",
     "Request",
     "ResFrame",
     "ServerEvent",
     "ServerResponse",
+    "SetReady",
     "TerrainInfo",
     "TerritoryState",
     "World",

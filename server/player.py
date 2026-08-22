@@ -7,6 +7,6 @@ Position = tuple[int, int]
 @dataclass
 class Player:
     id: UUID
-
-    def __init__(self, id: UUID):
-        self.id: UUID = id
+    name: str = "Player"
+    # Raised in the waiting room; the game starts when every player has.
+    ready: bool = False

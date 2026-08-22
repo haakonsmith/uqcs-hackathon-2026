@@ -5,6 +5,10 @@
 The menu is arrow keys or the mouse; JOIN GAME asks for a username and
 connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
 
+Joining lands in a lobby. The server generates the board only once every
+player there has readied up, so the board arrives as a push rather than as
+part of the join.
+
 The board is larger than the terminal, so only a slice is on screen. Arrow
 keys and the mouse wheel scroll it (shift+wheel scrolls sideways), `+` and
 `-` zoom in and out by subsampling, the mouse inspects the cell under the
@@ -36,6 +40,7 @@ from client.input import (
     pump_server,
     watch_resize,
 )
+from client.lobby import run_lobby
 from client.menu import JoinGame, Quit, alert, notice, run_menu
 from client.state import App
 from protocol import Connection, Join, JoinRejected
@@ -78,15 +83,19 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
         forwarder = asyncio.create_task(pump_server(conn.events, events))
         try:
             notice(term, "JOINING", "", address, f"as {username}")
-            joined = await conn.send(Join(room="lobby"))
+            joined = await conn.send(Join(room="lobby", name=username))
             if isinstance(joined, JoinRejected):
                 await alert(term, events, "JOIN REFUSED", "", joined.reason)
                 return
 
-            # The server owns the board and hands it over on the way in, so
-            # the client never generates one - two ends generating separately
-            # would disagree the moment a parameter drifted.
-            await play(App(term=term, world=joined.world.to_map()), events)
+            # The board does not exist until the lobby says go, and the server
+            # is the only end that generates one - two ends generating
+            # separately would disagree the moment a parameter drifted.
+            world = await run_lobby(term, events, conn, joined.lobby, joined.player_id)
+            if world is None:
+                return
+
+            await play(App(term=term, world=world.to_map()), events)
         except ConnectionError as error:
             await alert(term, events, "CONNECTION LOST", "", str(error))
         finally:

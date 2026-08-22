@@ -18,6 +18,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
+from protocol.lobby import Lobby
 from protocol.terrain import World
 
 # --------------------------------------------------------------------------
@@ -27,19 +28,23 @@ from protocol.terrain import World
 
 @dataclass(frozen=True)
 class Joined:
-    """Accepted into a room, with the id the player is known by.
+    """Accepted into the waiting room, with the id the player is known by.
 
-    The board rides along on the acceptance rather than arriving as a later
-    push: a client has nothing to draw until it has one, so a separate event
-    would only open a window where it is joined but blank.
-
-    A `World` and not a `terrain.WorldMap`, because this has to survive JSON.
-    Call `world.to_map()` for the renderable board.
+    No board here: it does not exist yet. The server generates one only once
+    everybody has readied up, and pushes it with `GameStarted`.
     """
 
     player_id: str
-    world: World
+    lobby: Lobby
     kind: Literal["joined"] = "joined"
+
+
+@dataclass(frozen=True)
+class ReadySet:
+    """A ready flag was accepted, with the roster it produced."""
+
+    lobby: Lobby
+    kind: Literal["ready_set"] = "ready_set"
 
 
 @dataclass(frozen=True)
@@ -62,7 +67,16 @@ class Echoed:
 @dataclass(frozen=True)
 class Join(Request[Joined | JoinRejected]):
     room: str
+    name: str = "Player"
     action: Literal["join"] = "join"
+
+
+@dataclass(frozen=True)
+class SetReady(Request[ReadySet]):
+    """Raise or lower this player's hand in the waiting room."""
+
+    ready: bool = True
+    action: Literal["set_ready"] = "set_ready"
 
 
 @dataclass(frozen=True)
@@ -77,15 +91,27 @@ class Echo(Request[Echoed]):
 
 
 @dataclass(frozen=True)
-class PlayerJoined:
-    player_id: str
-    kind: Literal["player_joined"] = "player_joined"
+class LobbyChanged:
+    """Somebody joined, left, or changed their mind about being ready.
+
+    Carries the whole roster rather than naming who moved: see `protocol.lobby`
+    for why the state is resent instead of patched.
+    """
+
+    lobby: Lobby
+    kind: Literal["lobby_changed"] = "lobby_changed"
 
 
 @dataclass(frozen=True)
-class PlayerLeft:
-    player_id: str
-    kind: Literal["player_left"] = "player_left"
+class GameStarted:
+    """Everyone readied up, so here is the board they will play on.
+
+    A `World` and not a `terrain.WorldMap`, because this has to survive JSON.
+    Call `world.to_map()` for the renderable board.
+    """
+
+    world: World
+    kind: Literal["game_started"] = "game_started"
 
 
 # --------------------------------------------------------------------------
@@ -95,9 +121,9 @@ class PlayerLeft:
 # Annotated rather than `type` aliases: pydantic needs the discriminator to
 # switch on the tag instead of trying each member in turn, which is both faster
 # and gives an error naming the tag rather than every failed candidate.
-ClientRequest = Annotated[Join | Echo, Field(discriminator="action")]
-ServerResponse = Annotated[Joined | JoinRejected | Echoed, Field(discriminator="kind")]
-ServerEvent = Annotated[PlayerJoined | PlayerLeft, Field(discriminator="kind")]
+ClientRequest = Annotated[Join | SetReady | Echo, Field(discriminator="action")]
+ServerResponse = Annotated[Joined | JoinRejected | ReadySet | Echoed, Field(discriminator="kind")]
+ServerEvent = Annotated[LobbyChanged | GameStarted, Field(discriminator="kind")]
 
 REQUEST_ADAPTER: TypeAdapter[ClientRequest] = TypeAdapter(ClientRequest)
 RESPONSE_ADAPTER: TypeAdapter[ServerResponse] = TypeAdapter(ServerResponse)
