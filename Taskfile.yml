@@ -1,0 +1,104 @@
+version: "3"
+
+# Everything you need to run, ship and check this. `task` on its own lists it.
+#
+# The container tasks default to podman because that is what the server runs,
+# and fall back to docker where podman is not installed. Override either way
+# with `CONTAINER=docker task run`.
+
+vars:
+  IMAGE: termination
+  PORT: '{{.PORT | default "8888"}}'
+  CONTAINER:
+    sh: command -v podman >/dev/null 2>&1 && echo podman || echo docker
+
+tasks:
+  default:
+    desc: List what there is to do
+    silent: true
+    cmds:
+      - task --list
+
+  # --------------------------------------------------------------------
+  # Playing
+  # --------------------------------------------------------------------
+
+  server:
+    desc: Run the server on this machine (no container)
+    cmds:
+      - uv run python server.py {{.CLI_ARGS}}
+
+  client:
+    desc: Join a game. `task client -- --public` or `-- --address host:8888`
+    cmds:
+      - uv run python client.py {{.CLI_ARGS}}
+
+  # --------------------------------------------------------------------
+  # Container - what the Fedora box runs
+  # --------------------------------------------------------------------
+
+  build:
+    desc: Build the server image
+    cmds:
+      - "{{.CONTAINER}} build -t {{.IMAGE}} -f Containerfile ."
+
+  run:
+    desc: Build and run the server in a container on {{.PORT}}
+    deps: [build]
+    cmds:
+      - "{{.CONTAINER}} run --rm -p {{.PORT}}:{{.PORT}} {{.IMAGE}} --port {{.PORT}} {{.CLI_ARGS}}"
+
+  run:unconfined:
+    desc: Same, for a host that refuses nested user namespaces to bwrap
+    deps: [build]
+    cmds:
+      # The sandbox needs unshare(); a locked-down seccomp profile is the
+      # usual reason its startup self-test fails. See the notes at the bottom
+      # of the Containerfile before reaching for anything stronger.
+      - "{{.CONTAINER}} run --rm --security-opt seccomp=unconfined -p {{.PORT}}:{{.PORT}} {{.IMAGE}} --port {{.PORT}} {{.CLI_ARGS}}"
+
+  sandbox:check:
+    desc: Report what isolation this machine can actually give the judge
+    cmds:
+      - uv run python -c "import asyncio; from server import sandbox; print(sandbox.ISOLATION.summary()); print('self test:', asyncio.run(sandbox.self_test()) or 'passed')"
+
+  shell:
+    desc: A shell inside the built image, for poking at it
+    deps: [build]
+    cmds:
+      - "{{.CONTAINER}} run --rm -it --entrypoint /bin/bash {{.IMAGE}}"
+
+  # --------------------------------------------------------------------
+  # Keeping it honest
+  # --------------------------------------------------------------------
+
+  check:
+    desc: Lint and type-check everything
+    cmds:
+      - task: lint
+      - task: types
+
+  lint:
+    desc: ruff
+    cmds:
+      - uv run ruff check .
+
+  fmt:
+    desc: Fix what ruff can fix, then format
+    cmds:
+      - uv run ruff check --fix .
+      - uv run ruff format .
+
+  types:
+    desc: ty and basedpyright
+    cmds:
+      - uvx ty check .
+      # `--level error`, or this fails on the 85 warnings the strict settings
+      # produce about numpy's untyped internals, and a gate that is always red
+      # is a gate nobody reads. Run `task types:strict` to see them.
+      - uv run basedpyright --level error .
+
+  types:strict:
+    desc: Type-check including every warning
+    cmds:
+      - uv run basedpyright .
