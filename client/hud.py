@@ -131,11 +131,7 @@ def phase_line(round_state: RoundState | None, me: str, message: str) -> str:
 
 def key_line(round_state: RoundState | None, selected: int | None) -> str:
     """The keys that do something right now, and any pending selection."""
-<<<<<<< HEAD
     common = "arrows/wheel scroll  +/- zoom  [o] borders  [l]egend  [tab] scores  [q]uit"
-=======
-    common = "[?] help  [o]verlay  [l]egend  [tab] scores  [q]uit"
->>>>>>> 0c2aa45450c6e114a5045b7c1461f9c047fe77df
     if round_state is None:
         return f"  {common} "
 
