@@ -3,6 +3,8 @@
     python client.py                              # menu, defaulting to localhost:8888
     python client.py --address 10.0.0.4           # someone else's machine
     python client.py --address ws://host:9000     # spelled out in full
+    TERMINATION_SERVER=host:8888 python client.py --public
+    python client.py --public                     # same, read from .env
 
 The menu is arrow keys or the mouse; JOIN GAME asks for a username and
 connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
@@ -28,10 +30,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import os
 import threading
 
 import blessed
 import websockets
+from dotenv import load_dotenv
 
 from client.input import (
     AppEvent,
@@ -110,6 +114,13 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
 
 DEFAULT_PORT = 8888
 
+# Where `--public` reads the shared server's address from - the environment,
+# or a git-ignored `.env` beside this file. Not a constant in here, because
+# this repository is public and the address is somebody's home connection
+# running an unauthenticated server: committing it would publish it, and git
+# history would keep it long after the address changed.
+PUBLIC_ADDRESS_ENV = "TERMINATION_SERVER"
+
 
 def websocket_url(value: str) -> str:
     """Accept `host`, `host:port` or a full `ws://...` and return a full URL.
@@ -140,15 +151,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Play a game of Termination.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
+    # Both write to `address`, so nothing downstream has to know which was
+    # given, and asking for two servers at once is refused rather than one
+    # quietly winning.
+    where = parser.add_mutually_exclusive_group()
+    where.add_argument(
         "--address",
         type=websocket_url,
         default=DEFAULT_ADDRESS,
         metavar="HOST[:PORT]",
         help="server to join; editable afterwards from the SETTINGS screen",
     )
+    where.add_argument(
+        "--public",
+        action="store_true",
+        help=f"join the shared server named by ${PUBLIC_ADDRESS_ENV}",
+    )
     parser.add_argument("--name", metavar="NAME", help="pre-fill the username prompt")
-    return parser.parse_args(argv)
+
+    args = parser.parse_args(argv)
+    if args.public:
+        args.address = _public_address(parser)
+    return args
+
+
+def _public_address(parser: argparse.ArgumentParser) -> str:
+    """Resolve `--public` from the environment, or explain how to set it.
+
+    Read here rather than as an argparse default so that an unset variable is
+    a clear error at startup instead of a connection attempt against "".
+    """
+
+    value = os.environ.get(PUBLIC_ADDRESS_ENV, "").strip()
+    if not value:
+        parser.error(
+            f"--public needs {PUBLIC_ADDRESS_ENV} set, for example:\n"
+            f"    export {PUBLIC_ADDRESS_ENV}=203.0.113.10:8888    # bash/zsh\n"
+            f"    set -x {PUBLIC_ADDRESS_ENV} 203.0.113.10:8888    # fish"
+        )
+    try:
+        return websocket_url(value)
+    except argparse.ArgumentTypeError as error:
+        parser.error(f"{PUBLIC_ADDRESS_ENV}={value!r}: {error}")
 
 
 async def main(args: argparse.Namespace) -> None:
@@ -176,4 +220,6 @@ async def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
+    load_dotenv(override=False)
+
     asyncio.run(main(parse_args()))
