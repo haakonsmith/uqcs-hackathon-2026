@@ -37,7 +37,7 @@ from protocol.frames import (
     dump_frame,
     parse_frame,
 )
-from protocol.world import TerrainInfo, TerritoryState, World
+from protocol.terrain import TerrainInfo, TerritoryState, World
 
 __all__ = [
     "FRAME_ADAPTER",

@@ -18,7 +18,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
-from protocol.world import World
+from protocol.terrain import World
 
 # --------------------------------------------------------------------------
 # Responses
