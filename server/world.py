@@ -28,6 +28,8 @@ from enum import Enum
 import numpy as np
 from numpy.typing import NDArray
 
+from uuid import UUID
+
 # --------------------------------------------------------------------------
 # Terrain
 # --------------------------------------------------------------------------
@@ -133,26 +135,12 @@ class Territory:
             sum(y for _, y in self.cells) / self.size,
         )
 
-
-@dataclass
-class Continent:
-    """A landmass. Holding all of it pays a reinforcement bonus, as in Risk."""
-
-    id: int
-    territories: list[int] = field(default_factory=list)
-
-    @property
-    def bonus(self) -> int:
-        return max(1, round(len(self.territories) / 3))
-
-
 @dataclass
 class WorldMap:
     width: int
     height: int
     grid: list[list[Cell]]
     territories: list[Territory]
-    continents: list[Continent]
 
     def cell(self, x: int, y: int) -> Cell:
         return self.grid[y][x]
@@ -177,10 +165,9 @@ def _edge_falloff(width: int, height: int) -> NDArray[np.float64]:
     """0 across the interior, ramping to 1 at the border.
 
     Subtracting this from the height field rings the map in ocean, so
-    landmasses read as continents instead of running off the edge. It stays
-    flat away from the border on purpose: a smooth centre-to-edge gradient
-    would pile all the land into one central blob, which is the opposite of
-    the several-continents board a Risk-like game wants.
+    landmasses do not run off the edge. It stays flat away from the border
+    on purpose: a smooth centre-to-edge gradient would pile all the land
+    into one central blob.
     """
     xs = np.arange(width)
     ys = np.arange(height)
@@ -297,29 +284,17 @@ def height_field(
     seed: int | None,
     edge_bias: float,
     water_fraction: float,
-    continent_scale: float,
-    mask_weight: float,
 ) -> NDArray[np.float64]:
-    """Two layers of Perlin fBm, shaped by the edge falloff, remapped to 0..1.
+    """Perlin fBm shaped by the edge falloff, remapped to 0..1.
 
-    A separate low-frequency mask decides *where* land is, while the detail
-    layer decides what that land looks like. Splitting the two is what breaks
-    the map into distinct continents: one noise layer at a single scale gives
-    either one connected mass or scattered speckle, never a handful of
-    coherent landmasses.
-
-    The remap is by quantile rather than by min/max: the value at the
-    `water_fraction` percentile becomes exactly sea level, and each side is
-    rescaled around it. Straight min/max normalising leaves the land area at
-    the mercy of the seed, which in practice always produced one blob covering
-    half the map. Pinning the coastline instead makes `water_fraction` the dial
-    that decides archipelago vs. supercontinent.
+    A single noise field drives the heights; cells are later classified into
+    atomic `Terrain` bands. The remap is by quantile rather than by min/max:
+    the value at the `water_fraction` percentile becomes exactly sea level,
+    and each side is rescaled around it. Straight min/max normalising leaves
+    the land area at the mercy of the seed. Pinning the coastline instead
+    makes `water_fraction` the dial for ocean vs land.
     """
-    detail = _fbm(seed, width, height, scale, octaves)
-    # Offsetting the seed keeps the mask uncorrelated with the detail layer.
-    mask = _fbm(None if seed is None else seed + 1013, width, height, continent_scale, 2)
-
-    raw = mask_weight * mask + (1.0 - mask_weight) * detail - edge_bias * _edge_falloff(width, height)
+    raw = _fbm(seed, width, height, scale, octaves) - edge_bias * _edge_falloff(width, height)
 
     lowest, highest = float(raw.min()), float(raw.max())
     sea = float(np.quantile(raw, water_fraction))
@@ -332,32 +307,6 @@ def height_field(
         SEA_LEVEL + (1.0 - SEA_LEVEL) * (raw - sea) / above,
     )
 
-
-def _find_continents(grid: list[list[Cell]]) -> list[list[tuple[int, int]]]:
-    """Flood fill land into connected components, largest first."""
-    height, width = len(grid), len(grid[0])
-    seen = [[False] * width for _ in range(height)]
-    components: list[list[tuple[int, int]]] = []
-
-    for sy in range(height):
-        for sx in range(width):
-            if seen[sy][sx] or grid[sy][sx].terrain.is_water:
-                continue
-            component = []
-            queue = deque([(sx, sy)])
-            seen[sy][sx] = True
-            while queue:
-                x, y = queue.popleft()
-                component.append((x, y))
-                for dx, dy in _ORTHOGONAL:
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < width and 0 <= ny < height and not seen[ny][nx] and grid[ny][nx].terrain.is_land:
-                        seen[ny][nx] = True
-                        queue.append((nx, ny))
-            components.append(component)
-
-    components.sort(key=len, reverse=True)
-    return components
 
 
 def _pick_seeds(cells: list[tuple[int, int]], count: int, rng: random.Random) -> list[tuple[int, int]]:
@@ -480,23 +429,18 @@ def generate(
     seed: int | None = None,
     edge_bias: float = 0.9,
     water_fraction: float = 0.62,
-    continent_scale: float | None = None,
-    mask_weight: float = 0.65,
     target_territory_size: int = 60,
     min_continent_size: int = 40,
     sea_route_distance: float = 12.0,
 ) -> WorldMap:
     """Build a playable board.
 
-    `scale` controls feature size: bigger means larger, smoother continents;
+    `scale` controls feature size: bigger means larger, smoother landforms;
     smaller means noisier, more fragmented terrain. `water_fraction` is the
-    share of the map that ends up ocean, and is the main lever on how many
-    separate continents you get. `continent_scale` (default `scale * 3`) sets
-    how big those continents are, and `mask_weight` how strongly they dominate
-    the finer terrain detail. `target_territory_size` is the rough cell count
-    per territory, so it sets how many territories a continent is cut into.
-    Landmasses under `min_continent_size` cells stay as scenery and are never
-    claimable.
+    share of the map that ends up ocean. `target_territory_size` is the rough
+    cell count per territory, so it sets how many territories a landmass is
+    cut into. Landmasses under `min_continent_size` cells stay as scenery and
+    are never claimable.
     """
     rng = random.Random(seed)
     field_ = height_field(
@@ -507,26 +451,10 @@ def generate(
         seed,
         edge_bias,
         water_fraction,
-        continent_scale if continent_scale is not None else scale * 3.0,
-        mask_weight,
     )
     grid = [[Cell(x, y, float(h), classify(float(h))) for x, h in enumerate(row)] for y, row in enumerate(field_)]
 
     territories: list[Territory] = []
-    continents: list[Continent] = []
-
-    for component in _find_continents(grid):
-        if len(component) < min_continent_size:
-            continue
-        count = max(1, round(len(component) / target_territory_size))
-        seeds = _pick_seeds(component, count, rng)
-        grown = _grow_territories(grid, component, seeds, first_id=len(territories))
-
-        continent = Continent(id=len(continents), territories=[t.id for t in grown])
-        for t in grown:
-            t.continent = continent.id
-        continents.append(continent)
-        territories.extend(grown)
 
     _link_land_neighbours(grid, territories)
     _link_sea_routes(territories, continents, sea_route_distance)
@@ -591,8 +519,7 @@ class ContinentState:
 class TerritoryState:
     """One claimable region on the board."""
 
-    id: int
-    name: str
+    id: UUID
     continent: int
     colour: int
     cells: list[tuple[int, int]] = field(default_factory=list)
