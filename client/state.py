@@ -15,7 +15,8 @@ import blessed
 from blessed.keyboard import Keystroke
 
 from client.input import SCROLL_KEYS, wheel_delta
-from client.render import Highlight, render, status
+from client.palette import Factions
+from client.render import Highlight, legend_panel, render, status
 from client.viewport import Viewport
 from protocol import ServerEvent, terrain
 
@@ -26,8 +27,10 @@ logger = logging.getLogger("client")
 class App:
     term: blessed.Terminal
     world: terrain.WorldMap
+    factions: Factions
     view: Viewport = field(default_factory=Viewport)
     overlay: bool = False
+    legend: bool = True
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
     highlights: dict[int, Highlight] = field(default_factory=dict)
@@ -62,7 +65,9 @@ class App:
             return
 
         owner = self.world.territories[cell.territory]
-        detail = f"territory {owner.id}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
+        side = self.factions.side_of.get(owner.id)
+        held = self.factions.label(side) if side is not None else "nobody"
+        detail = f"territory {owner.id} held by {held}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
         self.hover = f"{where} - {detail}"
         self.highlights[owner.id] = True
 
@@ -75,6 +80,9 @@ class App:
 
         if key == "o":
             self.overlay = not self.overlay
+            self.dirty = True
+        elif key == "l":
+            self.legend = not self.legend
             self.dirty = True
         elif key in "+=":
             moved = self.view.set_zoom(self.view.zoom - 1, self.world)
@@ -111,9 +119,12 @@ class App:
     def draw(self) -> None:
         term, view = self.term, self.view
         print(
-            term.home + render(term, self.world, view, self.overlay, self.highlights),
+            term.home + render(term, self.world, view, self.overlay, self.highlights, self.factions),
             end="",
         )
+        # After the board, because it is laid over it.
+        if self.legend:
+            print(legend_panel(term, view, self.factions), end="")
         print(
             term.move_xy(0, view.drawn_rows) + term.ljust(status(self.world, view, self.hover)[: term.width]),
             end="",
