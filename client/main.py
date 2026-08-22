@@ -21,8 +21,6 @@ import blessed
 
 from viewer import CELL_WIDTH, Color, territory_color
 
-from . import terrain
-
 SEED = 42
 
 # Bigger than any terminal, so there is something to scroll around.

@@ -36,9 +36,7 @@ from uuid import UUID, uuid4
 import numpy as np
 from numpy.typing import NDArray
 
-# --------------------------------------------------------------------------
-# Game shape
-# --------------------------------------------------------------------------
+from protocol.terrain import Terrain, WorldMap, Cell, Territory
 
 # Used when a board is generated without a lobby to take player ids from.
 PLAYER_COUNT = 4
@@ -49,46 +47,6 @@ TERRITORIES_PER_PLAYER = 8
 
 # Soldiers per player at the start, expressed per owned territory.
 SOLDIERS_PER_TERRITORY = 3
-
-
-# --------------------------------------------------------------------------
-# Terrain
-# --------------------------------------------------------------------------
-
-
-class Terrain(Enum):
-    """A terrain type plus the gameplay rules and palette that ride on it."""
-
-    DEEP_WATER = ("deep water", "~", False, 0, (14, 38, 78))
-    SHALLOW_WATER = ("shallow water", "-", False, 0, (30, 78, 132))
-    SAND = ("sand", ".", True, 1, (206, 188, 128))
-    GRASS = ("grass", ",", True, 1, (96, 142, 68))
-    FOREST = ("forest", "T", True, 2, (44, 92, 52))
-    HILLS = ("hills", "n", True, 2, (124, 112, 82))
-    MOUNTAIN = ("mountain", "A", False, 0, (152, 150, 156))
-
-    def __init__(
-        self,
-        label: str,
-        symbol: str,
-        passable: bool,
-        move_cost: int,
-        color: tuple[int, int, int],
-    ) -> None:
-        self.label = label
-        self.symbol = symbol
-        self.passable = passable
-        self.move_cost = move_cost
-        self.color = color
-
-    @property
-    def is_water(self) -> bool:
-        return self in (Terrain.DEEP_WATER, Terrain.SHALLOW_WATER)
-
-    @property
-    def is_land(self) -> bool:
-        return not self.is_water
-
 
 # (upper bound on normalised height, terrain type)
 TERRAIN_BANDS = [
@@ -108,7 +66,6 @@ SEA_LEVEL = max(limit for limit, terrain in TERRAIN_BANDS if terrain.is_water)
 # Moisture above this turns lowland into forest, below it into grass.
 _FOREST_MOISTURE = 0.5
 
-
 def classify(height: float) -> Terrain:
     for limit, terrain in TERRAIN_BANDS:
         if height < limit:
@@ -127,80 +84,6 @@ def classify_cell(height: float, moisture: float) -> Terrain:
     if terrain in (Terrain.GRASS, Terrain.FOREST):
         return Terrain.FOREST if moisture >= _FOREST_MOISTURE else Terrain.GRASS
     return terrain
-
-
-@dataclass(slots=True)
-class Cell:
-    x: int
-    y: int
-    height: float  # normalised 0.0 - 1.0
-    terrain: Terrain
-    territory: int | None = None  # index into WorldMap.territories
-
-
-    @property
-    def symbol(self) -> str:
-        return self.terrain.symbol
-
-
-# --------------------------------------------------------------------------
-# Board structure (generation-time)
-# --------------------------------------------------------------------------
-
-
-@dataclass
-class Territory:
-    """One claimable region: the unit of ownership in a Risk-like game."""
-
-    id: int
-    cells: list[tuple[int, int]] = field(default_factory=list)
-    land_neighbours: set[int] = field(default_factory=set)
-    sea_neighbours: set[int] = field(default_factory=set)
-    owner: UUID | None = None  # Player.id, or None while unclaimed
-    soldiers: int = 0
-
-    @property
-    def size(self) -> int:
-        return len(self.cells)
-
-    @property
-    def neighbours(self) -> set[int]:
-        return self.land_neighbours | self.sea_neighbours
-
-    @property
-    def centroid(self) -> tuple[float, float]:
-        return (
-            sum(x for x, _ in self.cells) / self.size,
-            sum(y for _, y in self.cells) / self.size,
-        )
-
-
-@dataclass
-class WorldMap:
-    width: int
-    height: int
-    grid: list[list[Cell]]
-    territories: list[Territory]
-
-    def cell(self, x: int, y: int) -> Cell:
-        return self.grid[y][x]
-
-    def cells(self) -> Iterator[Cell]:
-        for row in self.grid:
-            yield from row
-
-    @property
-    def owners(self) -> list[UUID]:
-        """Every player holding ground, first appearance first.
-
-        Ownership lives on the territories themselves, so the roster handed to
-        `generate()` is never kept around -- read it back off the board.
-        """
-        return list(dict.fromkeys(t.owner for t in self.territories if t.owner is not None))
-
-    def owned_by(self, player: UUID) -> list[Territory]:
-        return [t for t in self.territories if t.owner == player]
-
 
 _ORTHOGONAL = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
@@ -768,12 +651,6 @@ def _link_sea_routes(territories: list[Territory], max_distance: float) -> None:
         territories[b].sea_neighbours.add(a)
         groups.union(a, b)
 
-
-# --------------------------------------------------------------------------
-# Dividing the board between players
-# --------------------------------------------------------------------------
-
-
 def _divide(
     territories: list[Territory],
     players: list[UUID],
@@ -828,12 +705,6 @@ def _place_soldiers(
             territory.soldiers = 1
         for _ in range(budget - len(owned)):
             rng.choice(owned).soldiers += 1
-
-
-# --------------------------------------------------------------------------
-# Generation
-# --------------------------------------------------------------------------
-
 
 def _player_ids(players: Sequence[UUID] | None, player_count: int) -> list[UUID]:
     """Use the lobby's ids when there is one, otherwise mint placeholders."""
