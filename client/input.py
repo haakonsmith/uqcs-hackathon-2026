@@ -40,6 +40,11 @@ class Resized:
 
 
 @dataclass(frozen=True)
+class Tick:
+    """A second passed. Only the phase countdown cares."""
+
+
+@dataclass(frozen=True)
 class Received:
     """The server pushed something at us."""
 
@@ -48,7 +53,7 @@ class Received:
 
 # One queue carries all three, so the loop needs no select and no correlation
 # between a source and the type it yields - the tag is on the item.
-type AppEvent = KeyPress | Resized | Received
+type AppEvent = KeyPress | Resized | Received | Tick
 
 
 @contextlib.contextmanager
@@ -103,13 +108,8 @@ def watch_resize(events: asyncio.Queue[AppEvent]) -> None:
         pass
 
 
-def pump_keys(
-    term: blessed.Terminal,
-    events: asyncio.Queue[AppEvent],
-    stop: threading.Event,
-    poll: float = 0.1,
-) -> None:
-    """Post a `KeyPress` per keystroke, read on a dedicated thread.
+class KeyPump:
+    """Reads the terminal on a thread and posts one `KeyPress` per keystroke.
 
     `call_soon_threadsafe` is the supported way to hand work to the loop from a
     foreign thread. asyncio.Queue is not itself thread safe, so the put has to
@@ -119,18 +119,79 @@ def pump_keys(
     A dedicated thread rather than `asyncio.to_thread`, because this runs for
     the life of the app and would otherwise hold a default-executor worker.
 
-    `poll` is not a latency floor: `inkey` returns the moment a key arrives, so
-    the timeout only bounds how long before the thread rechecks `stop`.
+    Stoppable, because a subprocess that wants the keyboard - an editor, say -
+    cannot have it while this thread is sitting in `inkey()` eating bytes.
     """
-    loop = asyncio.get_running_loop()
 
-    def pump() -> None:
-        while not stop.is_set():
-            key = term.inkey(timeout=poll)
-            if key:
-                _ = loop.call_soon_threadsafe(events.put_nowait, KeyPress(key))
+    def __init__(self, term: blessed.Terminal, events: asyncio.Queue[AppEvent], poll: float = 0.1) -> None:
+        self._term: blessed.Terminal = term
+        self._events: asyncio.Queue[AppEvent] = events
+        # Not a latency floor: `inkey` returns the moment a key arrives, so
+        # this only bounds how long before the thread rechecks the stop flag.
+        self._poll: float = poll
+        self._stop: threading.Event = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    threading.Thread(target=pump, daemon=True, name="keys").start()
+    def start(self) -> None:
+        loop = asyncio.get_running_loop()
+        self._stop.clear()
+
+        def pump() -> None:
+            while not self._stop.is_set():
+                key = self._term.inkey(timeout=self._poll)
+                if key and not self._stop.is_set():
+                    _ = loop.call_soon_threadsafe(self._events.put_nowait, KeyPress(key))
+
+        self._thread = threading.Thread(target=pump, daemon=True, name="keys")
+        self._thread.start()
+
+    def stop(self, timeout: float = 1.0) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            # Wait for it to actually leave `inkey`, or it takes the first
+            # keystroke meant for whatever runs next.
+            self._thread.join(timeout)
+        self._thread = None
+
+    @contextlib.contextmanager
+    def paused(self) -> Generator[None]:
+        """Let go of the keyboard for the duration of the block."""
+        self.stop()
+        try:
+            yield
+        finally:
+            self.start()
+
+
+@contextlib.contextmanager
+def suspended(term: blessed.Terminal) -> Generator[None]:
+    """Give the terminal back, for a subprocess that wants all of it.
+
+    Mouse tracking off first: motion reports would otherwise arrive in the
+    subprocess as escape sequences it never asked for. Then out of the alt
+    screen and cursor back on, so an editor starts on a clean one.
+
+    cbreak is left alone. A full-screen program sets its own line discipline
+    and restores what it found, which is this one.
+    """
+    term._dec_mode_set_disabled(*MOUSE_MODES)  # pyright: ignore[reportPrivateUsage]
+    print(term.rmcup + term.normal_cursor, end="", flush=True)
+    try:
+        yield
+    finally:
+        print(term.smcup + term.hide_cursor, end="", flush=True)
+        term._dec_mode_set_enabled(*MOUSE_MODES)  # pyright: ignore[reportPrivateUsage]
+
+
+async def pump_clock(events: asyncio.Queue[AppEvent], period: float = 1.0) -> None:
+    """Post a `Tick` every `period` seconds.
+
+    The loop blocks on the queue, so without this a countdown would only move
+    when something else happened to wake the screen up.
+    """
+    while True:
+        await asyncio.sleep(period)
+        events.put_nowait(Tick())
 
 
 async def pump_server(incoming: asyncio.Queue[ServerEvent], events: asyncio.Queue[AppEvent]) -> None:

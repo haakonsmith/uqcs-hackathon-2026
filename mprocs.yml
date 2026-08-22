@@ -1,0 +1,7 @@
+procs:
+  server:
+    shell: uv run server.py
+  client1:
+    shell: uv run client.py
+  client2:
+    shell: uv run client.py

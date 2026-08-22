@@ -45,8 +45,12 @@ async def run_lobby(
     conn: Connection,
     lobby: Lobby,
     me: str,
-) -> World | None:
-    """Wait for everyone to ready up. The board, or None if the player left.
+) -> tuple[World, Lobby] | None:
+    """Wait for everyone to ready up. None if the player left instead.
+
+    Returns the board and the roster it was dealt to: the board carries player
+    ids but no names, so whoever draws it needs the last roster the server sent
+    to put a name to a colour.
 
     `lobby` is the roster that came back on the join, so the screen is correct
     on its first frame rather than blank until the first push.
@@ -58,7 +62,7 @@ async def run_lobby(
             case Resized():
                 pass
             case Received(event=GameStarted(world=world)):
-                return world
+                return world, lobby
             case Received(event=LobbyChanged(lobby=updated)):
                 lobby = updated
             case Received():

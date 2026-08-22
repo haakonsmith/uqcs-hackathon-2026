@@ -44,10 +44,10 @@ class Viewport:
     def span_y(self) -> int:
         return self.rows * self.zoom
 
-    def fit(self, width: int, height: int, world: terrain.WorldMap) -> None:
-        """Size to a terminal of `width` x `height`, leaving a status row."""
+    def fit(self, width: int, height: int, world: terrain.WorldMap, reserved: int = 1) -> None:
+        """Size to a terminal of `width` x `height`, less `reserved` status rows."""
         self.cols = max(1, width // CELL_WIDTH)
-        self.rows = max(1, height - 1)
+        self.rows = max(1, height - reserved)
         self.zoom = min(self.zoom, self.max_zoom(world))
         _ = self.scroll(0, 0, world)
 
