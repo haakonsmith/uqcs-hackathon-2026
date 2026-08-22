@@ -40,7 +40,7 @@ from protocol import (
     dump_frame,
     parse_frame,
 )
-from protocol.lobby import Lobby, LobbyPlayer
+from protocol.lobby import Lobby, LobbyPlayer, clean_name
 from protocol.terrain import World, WorldMap
 from server import combat, sandbox
 from server.judge import Judge, PlaceholderJudge, SubprocessJudge
@@ -127,8 +127,20 @@ class Server:
                     logger.info(f"turning away {name!r} from {_short(ws.id)}: a game is already running")
                     return JoinRejected(reason="a game is already in progress")
 
+                # Not a formality: every name here is drawn into somebody
+                # else's fixed-width panel, so one player choosing a long or a
+                # newline-bearing one decides how the room's screens look.
+                # The client stops this being reachable; a client that did not
+                # bother is exactly who this is for.
+                clean = clean_name(name)
+                if not clean:
+                    logger.info(f"turning away {name!r} from {_short(ws.id)}: nothing usable in the name")
+                    return JoinRejected(reason="pick a name with at least one printable character")
+                if clean != name.strip():
+                    logger.info(f"{_short(ws.id)} joined as {clean!r}, having asked for {name!r}")
+
                 player_id = uuid4()
-                player = Player(player_id, name=name)
+                player = Player(player_id, name=clean)
                 self.players[player_id] = player
                 self.sessions[ws] = player_id
 
@@ -150,16 +162,16 @@ class Server:
 
                 player.ready = ready
                 lobby = self.lobby()
-                logger.info(
-                    f"{_label(player)} is {'ready' if ready else 'not ready'}"
-                    f" - {lobby.ready_count}/{len(lobby.players)} ready, {lobby.waiting_for()}"
-                )
+                logger.info(f"{_label(player)} is {'ready' if ready else 'not ready'} - {lobby.ready_count}/{len(lobby.players)} ready, {lobby.waiting_for()}")
                 await self.broadcast(LobbyChanged(lobby=lobby), exclude=ws)
                 # The board is pushed by `_answer` once this response is out,
                 # so a client is never handed a game mid-request.
                 return ReadySet(lobby=lobby)
 
             case SubmitSolution(code=code):
+                if len(code) > 1024 * 1024:
+                    code = code[: 1024 * 1024]
+
                 player = self._player(ws)
                 if player is None or self.round is None:
                     return Refused(reason="no game in progress")

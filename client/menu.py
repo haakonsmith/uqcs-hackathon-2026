@@ -12,6 +12,7 @@ buttons only.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
@@ -24,10 +25,28 @@ import blessed
 from client.input import AppEvent, KeyPress, Received, Resized
 from client.palette import PANEL_BG, PANEL_FG, SELECTED_BG, SELECTED_FG, Color
 from client.render import CELL_WIDTH
+from protocol.lobby import MAX_NAME_LENGTH, clean_name
 from protocol.terrain import Terrain
 
 DEFAULT_ADDRESS = "ws://localhost:8888"
 DEFAULT_USERNAME = "Player"
+assert clean_name(DEFAULT_USERNAME) == DEFAULT_USERNAME, "the fallback name has to satisfy the rule it falls back to"
+
+
+def checked_username(value: str) -> str:
+    """Validate a name from the command line the way the server will.
+
+    Rejected rather than trimmed. A flag is typed once and not read back, so a
+    name silently shortened at startup is one the player goes on believing they
+    have until somebody else's scoreboard says otherwise. The prompt can afford
+    to just stop accepting keystrokes; an argument cannot.
+    """
+    cleaned = clean_name(value)
+    if not cleaned:
+        raise argparse.ArgumentTypeError("needs at least one printable character")
+    if cleaned != " ".join(value.split()):
+        raise argparse.ArgumentTypeError(f"must be at most {MAX_NAME_LENGTH} printable characters")
+    return cleaned
 
 # --- Solid Block Title Art ("TERMINATION") ---
 TITLE_ART = [
@@ -336,13 +355,19 @@ async def prompt(
     title: str,
     initial: str = "",
     hint: str = "[enter] confirm  [esc] cancel",
+    limit: int | None = None,
 ) -> str | None:
     """Read a line of text, or None if the player pressed escape.
 
     Reads the shared queue rather than the terminal, so keystrokes typed here
     cannot be swallowed by the pump thread that is already reading it.
+
+    `limit` stops the buffer growing past that many characters. Refusing the
+    keystroke rather than trimming on submit is the difference between a field
+    that will not take more and a field that quietly throws away what was
+    typed into it - the first is obvious the moment it happens.
     """
-    buffer = initial
+    buffer = initial[:limit] if limit is not None else initial
     _draw_prompt(term, title, buffer, hint)
 
     while True:
@@ -359,7 +384,7 @@ async def prompt(
                     return buffer.strip()
                 if name == "KEY_BACKSPACE":
                     buffer = buffer[:-1]
-                elif key.is_sequence or not key.isprintable():
+                elif key.is_sequence or not key.isprintable() or limit is not None and len(buffer) >= limit:
                     continue
                 else:
                     buffer += key
@@ -370,10 +395,19 @@ async def _activate(term: blessed.Terminal, events: asyncio.Queue[AppEvent]) -> 
     """Run the selected button. None means stay on the menu."""
     match MENU_ITEMS[state.selected].action:
         case "join":
-            username = await prompt(term, events, "=== ENTER YOUR USERNAME ===", state.username)
+            username = await prompt(
+                term,
+                events,
+                "=== ENTER YOUR USERNAME ===",
+                state.username,
+                hint=f"[enter] confirm  [esc] cancel   up to {MAX_NAME_LENGTH} characters",
+                limit=MAX_NAME_LENGTH,
+            )
             if username is None:
                 return None
-            state.username = username or DEFAULT_USERNAME
+            # The same rule the server will apply, so what the menu shows from
+            # here on is the name the room will know them by.
+            state.username = clean_name(username) or DEFAULT_USERNAME
             return JoinGame(address=state.address, username=state.username)
         case "settings":
             address = await prompt(term, events, "=== SERVER ADDRESS ===", state.address)

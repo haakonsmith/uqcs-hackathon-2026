@@ -107,6 +107,14 @@ class Echoed:
 
 @dataclass(frozen=True)
 class Join(Request[Joined | JoinRejected]):
+    """Ask to be let into a room under a name.
+
+    The name is what the server settles on, not what was asked for: it is run
+    through `clean_name` and the join is rejected if nothing usable survives.
+    A client should apply the same rule while the player types, so the name on
+    screen is the name they end up with.
+    """
+
     room: str
     name: str = "Player"
     action: Literal["join"] = "join"

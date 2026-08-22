@@ -12,6 +12,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# The longest name a player may take. Chosen against the scoreboard, which is
+# the narrowest place a name has to fit and the one where a run-on name would
+# push the columns beside it off the panel.
+MAX_NAME_LENGTH = 16
+
+
+def clean_name(name: str) -> str:
+    """A name as it will actually be shown, or "" if nothing usable is left.
+
+    Both ends call this, because both need the same answer: the client stops a
+    player typing past it, and the server refuses whatever a client that did
+    not bother sends anyway. Trusting the client here means one player can
+    decide how everybody else's screen is laid out.
+
+    Whitespace is collapsed and unprintable characters are dropped rather than
+    rejected. A name is drawn into a fixed-width row, so a tab or a newline in
+    one does not make it long, it makes it a name that eats the rows below;
+    and a terminal renders an escape sequence as an instruction rather than as
+    text. Neither is something a player types on purpose, so neither is worth
+    turning them away for.
+    """
+    # Whitespace first: `split` is what turns a newline or a tab into a word
+    # break. Dropping unprintables before it would weld the words either side
+    # of one together instead.
+    collapsed = " ".join(name.split())
+    printable = "".join(ch for ch in collapsed if ch.isprintable())
+    # `rstrip` because the cut can land on a space, and a name that renders
+    # with a trailing gap looks like the column is misaligned.
+    return printable[:MAX_NAME_LENGTH].rstrip()
+
 
 @dataclass(frozen=True)
 class LobbyPlayer:

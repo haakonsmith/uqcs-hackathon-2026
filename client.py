@@ -67,10 +67,21 @@ from client.input import (
     watch_resize,
 )
 from client.lobby import run_lobby
-from client.menu import DEFAULT_ADDRESS, JoinGame, Quit, alert, notice, run_menu, set_address, set_username
+from client.menu import (
+    DEFAULT_ADDRESS,
+    JoinGame,
+    Quit,
+    alert,
+    checked_username,
+    notice,
+    run_menu,
+    set_address,
+    set_username,
+)
 from client.palette import Factions
 from client.state import App
 from protocol import Connection, Join, JoinRejected
+from protocol.lobby import MAX_NAME_LENGTH
 
 
 async def play(app: App, events: asyncio.Queue[AppEvent]) -> None:
@@ -232,7 +243,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=f"join the shared server named by ${PUBLIC_ADDRESS_ENV}",
     )
-    parser.add_argument("--name", metavar="NAME", help="pre-fill the username prompt")
+    parser.add_argument(
+        "--name",
+        type=checked_username,
+        metavar="NAME",
+        help=f"pre-fill the username prompt; up to {MAX_NAME_LENGTH} characters",
+    )
 
     args = parser.parse_args(argv)
     if args.public:

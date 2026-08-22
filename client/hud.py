@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
+from protocol.lobby import MAX_NAME_LENGTH
 from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
 
 # The short version, for the bar under the board. Both input methods get a
@@ -258,18 +259,26 @@ def game_over_popup(name: str, winner: str | None) -> list[str]:
     return ["GAME OVER", "", verdict, "", "[any key] back to the board"]
 
 
+# Wide enough for the longest name a player may take plus the marker on their
+# own row. Derived rather than written down: a column narrower than the limit
+# truncates a legal name, and the first thing it eats is the "(you)" that says
+# which row is yours.
+YOU_MARKER = " (you)"
+NAME_COLUMN = MAX_NAME_LENGTH + len(YOU_MARKER)
+
+
 def scoreboard(round_state: RoundState | None, me: str) -> list[str]:
     """One line per player, for the panel `[tab]` opens."""
     if round_state is None:
         return ["no round yet"]
 
     rows = [f"ROUND {round_state.number} - {round_state.phase.upper()}", ""]
-    rows.append(f"{'player':<16} {'best':<24} {'troops':>6}  {'phase':<7}")
+    rows.append(f"{'player':<{NAME_COLUMN}} {'best':<24} {'troops':>6}  {'phase':<7}")
     for player in round_state.players:
-        name = f"{player.name} (you)" if player.player_id == me else player.name
+        name = f"{player.name}{YOU_MARKER}" if player.player_id == me else player.name
         best = player.best.summary() if player.best is not None else "no submission"
         mark = "done" if player.done else "thinking"
-        rows.append(f"{name[:16]:<16} {best[:24]:<24} {player.troops:>6}  {mark:<7}")
+        rows.append(f"{name[:NAME_COLUMN]:<{NAME_COLUMN}} {best[:24]:<24} {player.troops:>6}  {mark:<7}")
     return rows
 
 
