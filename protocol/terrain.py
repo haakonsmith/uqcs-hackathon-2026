@@ -204,7 +204,7 @@ class World:
         return WorldMap(width=self.width, height=self.height, grid=grid, territories=territories)
 
     @classmethod
-    def from_map(cls, world_map: WorldMap, seed: int | None = None) -> World:
+    def from_map(cls, world_map: WorldMap, seed: int | None = None) -> 'World':
         """Build serialisable state from a generated WorldMap."""
         return cls(
             width=world_map.width,

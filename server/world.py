@@ -32,8 +32,7 @@ from uuid import UUID, uuid4
 import numpy as np
 from numpy.typing import NDArray
 
-from protocol.terrain import Cell, Terrain, Territory, WorldMap
-from protocol.world import World
+from protocol.terrain import Cell, Terrain, Territory, WorldMap, World
 
 # Used when a board is generated without a lobby to take player ids from.
 PLAYER_COUNT = 4
