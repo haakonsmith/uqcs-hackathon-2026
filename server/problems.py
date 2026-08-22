@@ -128,20 +128,6 @@ BANK: tuple[Entry, ...] = (
     ),
     Entry(
         problem=Problem(
-            id="EZ 004",
-            title="Full Name Joiner",
-            statement="Read a first name and a last name separated by a space. Print them back separated by a comma and a space in the format 'LastName, FirstName'.",
-            signature="stdin: two space-separated strings -> stdout: one combined string",
-            examples=[("John Smith", "Smith, John")],
-        ),
-        tests=(
-            TestCase("John Smith", "Smith, John"),
-            TestCase("Alice Green", "Green, Alice"),
-            TestCase("A B", "B, A"),
-        ),
-    ),
-    Entry(
-        problem=Problem(
             id="EZ 005",
             title="K-Permutations",
             statement="Read an integer k on the first line. Read a space-separated list of numbers on the second line. Print a list of all possible k-length permutations of the given numbers, where each permutation is represented as a tuple.",
