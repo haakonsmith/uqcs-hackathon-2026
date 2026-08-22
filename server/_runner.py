@@ -19,9 +19,13 @@ Invoked as:
 from __future__ import annotations
 
 import os
-import resource
 import runpy
 import sys
+
+try:
+  import resource
+except ImportError:
+  resource = None
 
 # Exit code used when the runner itself refuses to start, to tell a crash in
 # the harness apart from a crash in the solution.
@@ -40,6 +44,9 @@ def clamp(name: str, value: int) -> bool:
     rlimit support on every single run would bury the traceback they need.
     `sandbox.probe()` is where the parent reports what actually holds.
     """
+    if resource is None:
+        return False
+    
     limit = getattr(resource, name, None)
     if limit is None:
         return False
