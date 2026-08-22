@@ -34,6 +34,7 @@ PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
         ("[p]", "place every troop you have left"),
         ("[1-9]", "how many troops a placement puts down"),
         ("[n] [N]", "cycle your territories, then neighbours"),
+        ("[esc]", "let go of the picked territory"),
         ("[c]", "clear everything you have planned"),
         ("[f]", "finished with this phase"),
     ],

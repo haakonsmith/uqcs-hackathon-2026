@@ -250,7 +250,14 @@ class App:
             self.dirty = True
             return
         if key.name == "KEY_ESCAPE":
+            # The one way back to no pick at all. Without it a territory chosen
+            # with [n] stays white for the rest of the game, because cycling
+            # only ever moves the pick to somewhere else.
+            if self.selected is not None:
+                self.selected = None
+                self._say("nothing picked")
             self.scoreboard = False
+            self.refresh_hover()
             self.dirty = True
             return
         if key in ("n", "N"):
@@ -312,7 +319,7 @@ class App:
                 self._say(f"next placement puts down {self.move_count}")
                 return True
             if key in (" ", "p"):
-                await self._place(None if key == "p" else self.move_count)
+                await self._place(self._target_territory(), None if key == "p" else self.move_count)
                 return True
             if key == "c":
                 await self._request(CancelPlan())
@@ -371,14 +378,17 @@ class App:
         self._say(f"submitting {len(code)} bytes ...")
         await self._request(SubmitSolution(code=code))
 
-    async def _place(self, count: int | None) -> None:
+    async def _place(self, territory: int | None, count: int | None) -> None:
         """Promise troops to a territory. `count` of None means all in hand.
 
-        Nothing lands on the board here either: the answer comes back as a
-        `(+n)` on the territory, and the troops arrive when the phase ends -
-        joining the garrison on your own ground, or assaulting it next door.
+        Told which territory rather than working it out, so a caller that
+        already knows - a click does - does not have to route the answer
+        through the keyboard pick to get it here.
+
+        Nothing lands on the board either: the answer comes back as a `(+n)` on
+        the territory, and the troops arrive when the phase ends - joining the
+        garrison on your own ground, or assaulting it next door.
         """
-        territory = self._target_territory()
         if territory is None:
             self._say("click a territory, or pick one with [n]")
             return
@@ -404,13 +414,15 @@ class App:
             self._say("nothing there")
             return
 
-        # `_place` reads the keyboard pick first, so pointing it at what was
-        # clicked is a matter of setting it.
-        self.selected = under
+        # Deliberately not `self.selected = under`. A click says where to put
+        # troops once; the keyboard pick is a standing choice, drawn white
+        # until something clears it. Making a click set it left every clicked
+        # territory highlighted for the rest of the phase.
         if self.round.phase != "commanding":
+            self.selected = under
             self.dirty = True
         else:
-            await self._place(self.move_count)
+            await self._place(under, self.move_count)
 
     def _hovered_territory(self) -> int | None:
         """The territory under the mouse, ignoring any keyboard pick."""
