@@ -3,25 +3,17 @@ import dataclasses
 import json
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import websockets
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 
+from server.actions import Echo, ServerAction, parse_action
 from server.player import Player
 
 logger = logging.getLogger("Server")
-
-
-Actions = Literal["echo"]
-
-
-@dataclass
-class ServerAction[T]:
-    action: Actions
-    payload: T
 
 
 class Server:
@@ -29,6 +21,11 @@ class Server:
         self.connections: set[websockets.ServerConnection] = set()
         self.game: None = None  # put your game state here!
         self.players: dict[UUID, Player] = {}
+
+    async def dispatch_action(self, ws: websockets.ServerConnection, action: ServerAction):
+        match action:
+            case Echo():
+                await ws.send(json.dumps(dataclasses.asdict(Echo())))
 
     async def register_connection(self, websocket: websockets.ServerConnection):
         logger.info(
@@ -39,13 +36,7 @@ class Server:
         async for message in websocket:
             try:
                 if isinstance(message, str):
-                    event = ServerAction(**json.loads(message))
-
-                    match event.action:
-                        case "echo":
-                            await websocket.send(json.dumps(dataclasses.asdict(ServerAction(action="echo", payload=None))))
-
-                    print(f"got event {event}")
+                    await self.dispatch_action(websocket, parse_action(message))
             except Exception as e:
                 logger.error(f"Failed to handle message {e}")
 
