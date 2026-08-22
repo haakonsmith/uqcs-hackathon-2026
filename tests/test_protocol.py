@@ -13,8 +13,8 @@ import typing
 import pytest
 
 from protocol import actions
-from protocol.actions import EVENT_ADAPTER, REQUEST_ADAPTER, RESPONSE_ADAPTER
-from protocol.core import Request, response_types
+from protocol.actions import EVENT_ADAPTER, REQUEST_ADAPTER, RESPONSE_ADAPTER, version_complaint
+from protocol.core import PROTOCOL_VERSION, UNVERSIONED, Request, response_types
 
 
 def _union_members(alias: object) -> set[type]:
@@ -75,3 +75,72 @@ def test_every_request_names_a_response_it_can_actually_get() -> None:
 def test_a_submission_waits_longer_than_an_ordinary_request() -> None:
     """The judge runs a sandbox before it can answer; a placement is a dict write."""
     assert actions.SubmitSolution.timeout_seconds > actions.PlaceTroops.timeout_seconds
+
+
+# --------------------------------------------------------------------------
+# The version handshake
+# --------------------------------------------------------------------------
+
+
+def test_matching_versions_have_no_complaint() -> None:
+    assert version_complaint(PROTOCOL_VERSION, peer="client") is None
+
+
+def test_a_peer_that_predates_the_handshake_is_named_as_the_stale_one() -> None:
+    complaint = version_complaint(UNVERSIONED, peer="client")
+    assert complaint is not None
+    assert "update the client" in complaint
+
+
+def test_a_peer_ahead_of_us_makes_us_the_stale_one() -> None:
+    complaint = version_complaint(PROTOCOL_VERSION + 1, peer="server")
+    assert complaint is not None
+    assert "update this end" in complaint, "telling them to update the newer end sends them to the wrong machine"
+
+
+def test_the_complaint_names_both_versions() -> None:
+    complaint = version_complaint(PROTOCOL_VERSION + 3, peer="server")
+    assert complaint is not None
+    assert f"v{PROTOCOL_VERSION}" in complaint
+    assert f"v{PROTOCOL_VERSION + 3}" in complaint
+
+
+def test_join_defaults_to_unversioned() -> None:
+    """A client too old to send one has to be readable, not a parse error."""
+    assert actions.Join(room="lobby").version == UNVERSIONED
+
+
+def test_joined_carries_the_version_back() -> None:
+    """Otherwise an older server accepts a newer client and breaks later."""
+    assert "version" in actions.Joined.__dataclass_fields__
+
+
+async def test_the_server_turns_away_a_client_that_cannot_read_its_answers() -> None:
+    from server.server import Server
+
+    class FakeSocket:
+        id = "fake"
+
+        async def send(self, message: str) -> None:
+            pass
+
+    server = Server()
+    response = await server.handle_request(FakeSocket(), actions.Join(room="lobby", name="Old"))  # pyright: ignore[reportArgumentType]
+    assert isinstance(response, actions.JoinRejected)
+    assert "update the client" in response.reason
+    assert not server.players, "a refused join must not leave a player behind"
+
+
+async def test_a_matching_client_is_told_the_servers_version() -> None:
+    from server.server import Server
+
+    class FakeSocket:
+        id = "fake"
+
+        async def send(self, message: str) -> None:
+            pass
+
+    request = actions.Join(room="lobby", name="Haakon", version=PROTOCOL_VERSION)
+    response = await Server().handle_request(FakeSocket(), request)  # pyright: ignore[reportArgumentType]
+    assert isinstance(response, actions.Joined)
+    assert response.version == PROTOCOL_VERSION

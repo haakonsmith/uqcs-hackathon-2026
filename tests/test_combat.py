@@ -259,3 +259,54 @@ def test_the_defender_is_read_before_the_board_is_written(alice: UUID, bob: UUID
 
     assert world.territories[1].owner == alice, "the board moved on"
     assert battle.defender == str(bob), "the report did not"
+
+
+# --------------------------------------------------------------------------
+# Reach, which both ends have to agree on
+# --------------------------------------------------------------------------
+
+
+def test_your_own_ground_is_in_reach(alice: UUID, bob: UUID) -> None:
+    world = board((alice, 3), (bob, 3))
+    assert world.within_reach(alice, 0)
+
+
+def test_ground_touching_yours_is_in_reach(alice: UUID, bob: UUID) -> None:
+    world = board((alice, 3), (bob, 3))
+    assert world.within_reach(alice, 1), "a neighbour is where an assault lands"
+
+
+def test_ground_that_touches_nothing_of_yours_is_not(alice: UUID, bob: UUID) -> None:
+    world = board((alice, 3), (bob, 3), (bob, 3), links={0: {1}, 1: {0}, 2: set()})
+    assert not world.within_reach(alice, 2)
+
+
+def test_a_stranger_reaches_nothing(alice: UUID) -> None:
+    assert not board((alice, 3), (alice, 3)).within_reach(uuid4(), 0)
+
+
+def test_nobody_reaches_nothing(alice: UUID) -> None:
+    assert not board((alice, 3)).within_reach(None, 0)
+
+
+def test_an_unknown_territory_is_out_of_reach_rather_than_an_error(alice: UUID) -> None:
+    """Callers that want "no such territory" said out loud check for it first."""
+    assert not board((alice, 3)).within_reach(alice, 99)
+
+
+def test_borders_is_the_touching_half_on_its_own(alice: UUID, bob: UUID) -> None:
+    world = board((alice, 3), (bob, 3))
+    assert world.borders(alice, 1)
+    assert not world.borders(alice, 0), "holding it is not the same as bordering it"
+
+
+def test_check_placement_uses_the_same_rule_it_shares_with_the_client(alice: UUID, bob: UUID) -> None:
+    world = board((alice, 3), (bob, 3), (bob, 3), links={0: {1}, 1: {0}, 2: set()})
+    for territory_id in range(3):
+        allowed = world.within_reach(alice, territory_id)
+        try:
+            combat.check_placement(world, alice, territory_id, 1)
+        except IllegalMove:
+            assert not allowed, f"refused {territory_id}, which the shared rule allows"
+        else:
+            assert allowed, f"accepted {territory_id}, which the shared rule refuses"

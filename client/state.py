@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from dataclasses import dataclass, field, replace
 from uuid import UUID
 
@@ -124,10 +125,6 @@ class App:
     # Territory picked with the keyboard. Takes precedence over the mouse,
     # so the game is playable on a terminal with no mouse reporting.
     selected: int | None = None
-    # Something worth saying that the next plan summary would otherwise
-    # overwrite. Held rather than said, because the summary lands after the
-    # round trip that produced it.
-    note: str | None = None
     scoreboard: bool = False
     # A result the player has to acknowledge. Any key dismisses it, and
     # while it is up nothing else reads the keyboard - a verdict that
@@ -136,6 +133,7 @@ class App:
     # When a held popup may be dismissed, on the monotonic clock. Panels that
     # arrive unasked - the reveal, the winner - are held for a few seconds so
     # they cannot be closed by a key already on its way down.
+    popup_hold_until: float = 0.0
     # The last panel shown, so `[v]` can put it back after a dismissal.
     last_popup: list[str] | None = None
     # Troops the next placement will promise, set with the number keys.
@@ -148,16 +146,22 @@ class App:
     # can be refused. Drawn as the `(+n)` beside a garrison, and emptied when
     # the phase carries it out.
     placements: dict[int, int] = field(default_factory=dict)
-    # Territories the last resolution fought over, lit on the board until the
+    # What the last resolution did, by territory, lit on the board until the
     # next commanding phase opens. A popup can name where a battle was, but
     # only the board can show it, and the popup is gone the moment a key is
     # pressed - which is well before anybody has found the place on the map.
-    battle_marks: set[int] = field(default_factory=set)
+    #
+    # The note comes with the mark rather than the mark being a bare set: a lit
+    # territory with no way to ask what happened to it is a question mark, and
+    # the player is left counting garrisons to work out which way it went.
+    battle_notes: dict[int, str] = field(default_factory=dict)
 
     def tick(self) -> None:
-        """A second passed: only the countdown on the phase bar changed."""
+        """A second passed: the phase bar's countdown, and a held panel's."""
         if self.round is not None:
             self.round = replace(self.round, seconds_left=max(0.0, self.round.seconds_left - 1.0))
+            self.dirty = True
+        if self.popup is not None and self.popup_hold_until > time.monotonic():
             self.dirty = True
 
     def invalidate(self) -> None:
@@ -183,8 +187,16 @@ class App:
         """What the hover slot says when the mouse is not over the board."""
         if self.selected is not None:
             held = self.world.territories[self.selected]
-            return f"picked {self.selected} ({held.soldiers} soldiers{self._placed_suffix(self.selected)})"
+            return (
+                f"picked {self.selected} ({held.soldiers} soldiers{self._placed_suffix(self.selected)})"
+                f"{self._mark_suffix(self.selected)}"
+            )
         return fallback or "[n] to pick a territory, or use the mouse"
+
+    def _mark_suffix(self, territory_id: int) -> str:
+        """` - you took it from Guus`, for ground the last phase fought over."""
+        note = self.battle_notes.get(territory_id)
+        return f" - {note}" if note else ""
 
     def _placed_suffix(self, territory_id: int) -> str:
         """`, +3 placed` for ground with troops promised to it, else nothing."""
@@ -200,7 +212,7 @@ class App:
         self.highlights = {}
         # Under the pick rather than over it: the pick is a thing the player is
         # doing now, and a mark is a thing that already happened.
-        for territory_id in self.battle_marks:
+        for territory_id in self.battle_notes:
             self.highlights[territory_id] = (200, 110, 45)
         if self.selected is not None:
             self.highlights[self.selected] = (245, 245, 245)
@@ -216,7 +228,11 @@ class App:
             self.dirty = True
             return
 
-        where = f"({cell.x},{cell.y}) {cell.terrain.label} height {cell.height:.2f}"
+        # Terrain detail is decoration, and the line it sits on is shared with
+        # the key hints. A territory the last phase fought over has something
+        # better to say in that space.
+        marked = cell.territory is not None and cell.territory in self.battle_notes
+        where = f"({cell.x},{cell.y})" if marked else f"({cell.x},{cell.y}) {cell.terrain.label} height {cell.height:.2f}"
         if cell.territory is None:
             self.hover = f"{where} - unclaimed"
             self.dirty = True
@@ -228,7 +244,7 @@ class App:
         soldiers = f"{owner.soldiers} soldiers{self._placed_suffix(owner.id)}"
         # Who holds it and how strongly. The neighbour count was here too and
         # answered a question nobody asks while deciding a move.
-        self.hover = f"{where} - {held}, {soldiers}"
+        self.hover = f"{where} - {held}, {soldiers}{self._mark_suffix(owner.id)}"
         self.highlights[owner.id] = True
         self.dirty = True
 
@@ -244,9 +260,14 @@ class App:
             # a player presses a key, and stays until then.
             if (key.name or "").startswith("MOUSE_"):
                 return
+            if time.monotonic() < self.popup_hold_until:
+                # Still held. The keystroke is swallowed rather than queued:
+                # it was aimed at whatever was on screen before this appeared.
+                return
             # The panel was drawn over the terrain, so the terrain under it
             # has to be drawn again to erase it.
             self.popup = None
+            self.popup_hold_until = 0.0
             self.dirty = True
             return
 
@@ -450,27 +471,30 @@ class App:
         return cell.territory if cell is not None else None
 
     def _selectable(self) -> list[int]:
-        """What `n` cycles through: everywhere troops may go.
+        """What `n` cycles through: everywhere troops may go, and what just happened.
 
         Your own ground first, then the ground touching it, because reinforcing
         is the commoner move and assaulting a neighbour is the other one.
+
+        Then anywhere the last phase fought over. A territory that was taken
+        off you outright borders nothing of yours any more, so without this the
+        one place a player most wants to look at is the one place the keyboard
+        cannot reach - and reading the mark meant owning a mouse.
         """
         mine = self._my_uuid()
         held = sorted(t.id for t in self.world.territories if t.owner == mine)
         touching = {n for t in held for n in self.world.territories[t].neighbours}
-        return [*held, *sorted(touching.difference(held))]
+        reachable = [*held, *sorted(touching.difference(held))]
+        seen = set(reachable)
+        return [*reachable, *sorted(t for t in self.battle_notes if t not in seen)]
 
     def _in_reach(self, territory_id: int) -> bool:
         """Whether troops may be placed here: yours, or bordering yours.
 
-        The server decides, but it is the same rule either way and a refusal
-        that arrives after a round trip reads as the click having missed.
+        Literally the rule the server checks against - the same method, not a
+        copy of it - so a placement this allows is one the server accepts.
         """
-        mine = self._my_uuid()
-        if mine is None:
-            return False
-        target = self.world.territories[territory_id]
-        return target.owner == mine or any(self.world.territories[n].owner == mine for n in target.neighbours)
+        return self.world.within_reach(self._my_uuid(), territory_id)
 
     def _cycle(self, step: int) -> None:
         """Step through the selectable territories, scrolling each into view."""
@@ -565,16 +589,13 @@ class App:
         if placed:
             parts.append(f"{placed} placed")
         parts.append(f"{remaining} in hand" if remaining else "nothing left in hand")
-        summary = "  ".join(parts)
-        if self.note is not None:
-            summary, self.note = f"{self.note}  -  {summary}", None
-        return summary
+        return "  ".join(parts)
 
     def _say(self, message: str) -> None:
         self.message = message
         self.dirty = True
 
-    def _show_popup(self, lines: list[str]) -> None:
+    def _show_popup(self, lines: list[str], hold: float = 0.0) -> None:
         """Put a panel up, and remember it so `[v]` can bring it back.
 
         Panels wait rather than expire. A result that vanishes on a timer is a
@@ -583,8 +604,24 @@ class App:
         ones worth reading.
         """
         self.popup = lines
+        self.popup_hold_until = time.monotonic() + hold if hold else 0.0
         self.last_popup = lines
         self.dirty = True
+
+    def _panel(self) -> list[str]:
+        """The popup as it should be drawn right now.
+
+        A panel's last line is its dismiss hint, and while pressing a key would
+        do nothing the hint says when it will start working instead. Leaving
+        "[any key] back to the board" up while keys do nothing is the version
+        of this that reads as the game having frozen.
+        """
+        if not self.popup:
+            return []
+        left = self.popup_hold_until - time.monotonic()
+        if left <= 0:
+            return self.popup
+        return [*self.popup[:-1], hud.hold_notice(left)]
 
     def _handle_mouse(self, key: Keystroke) -> bool:
         # Keystroke reports mouse position as mouse_xy, not .x / .y, and gives
@@ -631,13 +668,13 @@ class App:
         # plus the keys that work right now.
         bars = [
             hud.phase_line(self.round, self.me, self.message),
-            f" {self.hover}" + hud.key_line(self.round),
+            hud.bottom_bar(self.hover, hud.key_line(self.round), frame.width),
         ]
         for offset, text in enumerate(bars):
             frame.row(view.drawn_rows + offset, text)
 
         if self.popup is not None:
-            hud.draw_panel(frame, self.popup)
+            hud.draw_panel(frame, self._panel())
         elif self.scoreboard:
             hud.draw_panel(frame, hud.scoreboard(self.round, self.me))
 
@@ -671,7 +708,7 @@ class App:
                         # the submitting phase, which is the whole point: a
                         # player looks up from their editor and can still see
                         # what happened to them.
-                        self.battle_marks = set()
+                        self.battle_notes = {}
                 self.round = round_state
                 self.refresh_hover()
                 self.dirty = True
@@ -693,12 +730,20 @@ class App:
                 # Newer than any verdict from this round, so [v] should
                 # bring this back rather than the submission before it.
                 self.last_verdict = None
-                self.battle_marks = {b.territory for b in battles} | {d.territory for d in dropped}
+                self.battle_notes = {b.territory: hud.mark_note(b, self.me) for b in battles}
+                for order in dropped:
+                    # A territory can be both fought over and short of troops
+                    # somebody meant to land on it. The battle is the bigger
+                    # news, so it keeps the line.
+                    self.battle_notes.setdefault(order.territory, hud.dropped_note(order, self.me))
                 self.refresh_hover()
-                self._show_popup(hud.battles_popup(battles, dropped, self.world, self.me))
+                self._show_popup(
+                    hud.battles_popup(battles, dropped, self.world, self.me),
+                    hold=hud.reveal_hold(battles, dropped),
+                )
                 self._say(f"{len(battles)} battles" if battles else "troops landed")
             case GameOver(name=name, winner=winner):
-                self._show_popup(hud.game_over_popup(name, winner))
+                self._show_popup(hud.game_over_popup(name, winner), hold=hud.GAME_OVER_HOLD_SECONDS)
                 ending = f"{name} has taken the whole board" if winner is not None else "nobody is left holding ground"
                 self._say(f"{ending} - game over")
             case _:

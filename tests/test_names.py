@@ -13,7 +13,7 @@ import pytest
 
 from client.hud import NAME_COLUMN, YOU_MARKER, scoreboard
 from client.menu import checked_username
-from protocol import Join, Joined, JoinRejected
+from protocol import PROTOCOL_VERSION, Join, Joined, JoinRejected
 from protocol.lobby import MAX_NAME_LENGTH, clean_name
 from protocol.rounds import PlayerRound, RoundState
 from server.server import Server
@@ -76,7 +76,8 @@ class FakeSocket:
 
 
 async def _join(server: Server, name: str) -> Joined | JoinRejected:
-    return await server.handle_request(FakeSocket(), Join(room="lobby", name=name))  # pyright: ignore[reportArgumentType]
+    request = Join(room="lobby", name=name, version=PROTOCOL_VERSION)
+    return await server.handle_request(FakeSocket(), request)  # pyright: ignore[reportArgumentType]
 
 
 async def test_a_long_name_is_shortened_rather_than_refused() -> None:

@@ -39,9 +39,10 @@ from protocol.actions import (
     ServerResponse,
     SetReady,
     SubmitSolution,
+    version_complaint,
 )
 from protocol.connection import Connection
-from protocol.core import ProtocolError, Request, response_types
+from protocol.core import PROTOCOL_VERSION, UNVERSIONED, ProtocolError, Request, response_types
 from protocol.frames import (
     FRAME_ADAPTER,
     EvtFrame,
@@ -69,6 +70,8 @@ from protocol.terrain import TerrainInfo, TerritoryState, World
 
 __all__ = [
     "FRAME_ADAPTER",
+    "PROTOCOL_VERSION",
+    "UNVERSIONED",
     "Acknowledged",
     "BattleReport",
     "BoardChanged",
@@ -119,4 +122,5 @@ __all__ = [
     "dump_frame",
     "parse_frame",
     "response_types",
+    "version_complaint",
 ]

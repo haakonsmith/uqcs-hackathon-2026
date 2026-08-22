@@ -15,6 +15,21 @@ import typing
 from dataclasses import dataclass
 from typing import ClassVar
 
+# What this build of the protocol calls itself. Bump it whenever a change to
+# the messages in `actions` or `rounds` would stop an older peer reading them:
+# a field removed or renamed, a required field added, a type narrowed. Adding
+# an optional field with a default does not need one - both ends already cope.
+#
+# It exists because the alternative is what a mismatch used to look like: a
+# pydantic traceback in the middle of somebody's game, at whichever message
+# happened to change, naming a field nobody has heard of. A number checked once
+# at the door turns that into a sentence saying which end is out of date.
+PROTOCOL_VERSION = 1
+
+# What an end that predates the handshake looks like. Neither side sends it, so
+# it is what the default fills in when the field is simply absent.
+UNVERSIONED = 0
+
 
 class ProtocolError(Exception):
     """The peer answered with something the request never asked for."""

@@ -152,3 +152,163 @@ async def test_with_no_pick_the_phase_keys_fall_back_to_the_cursor(app: App) -> 
 
     (sent,) = app.conn.sent  # pyright: ignore[reportAttributeAccessIssue]
     assert sent.territory == 1
+
+
+# --------------------------------------------------------------------------
+# A panel that arrives unasked cannot be closed by a key already in flight
+# --------------------------------------------------------------------------
+
+
+async def test_a_held_panel_survives_a_keystroke(app: App) -> None:
+    """The reveal lands on the server's clock, not the player's."""
+    app._show_popup(["REPORT", "", "[any key] back to the board"], hold=5.0)
+    await app.handle_key(blessed.keyboard.Keystroke("x"))
+    assert app.popup is not None, "the key was aimed at whatever was on screen before this"
+
+
+async def test_an_unheld_panel_closes_on_the_first_key(app: App) -> None:
+    app._show_popup(["HELP", "", "[any key] back to the board"])
+    await app.handle_key(blessed.keyboard.Keystroke("x"))
+    assert app.popup is None
+
+
+async def test_a_panel_closes_once_its_hold_has_run_out(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
+    import client.state as state_module
+
+    app._show_popup(["REPORT", "", "[any key] back to the board"], hold=5.0)
+    later = app.popup_hold_until + 1.0
+    monkeypatch.setattr(state_module.time, "monotonic", lambda: later)
+
+    await app.handle_key(blessed.keyboard.Keystroke("x"))
+    assert app.popup is None
+    assert app.popup_hold_until == 0.0
+
+
+def test_a_held_panel_says_when_it_will_take_a_key(app: App) -> None:
+    app._show_popup(["REPORT", "", "[any key] back to the board"], hold=5.0)
+    assert app._panel()[-1].startswith("[any key] in ")
+
+
+def test_an_unheld_panel_keeps_its_own_last_line(app: App) -> None:
+    lines = ["HELP", "", "[any key] back to the board"]
+    app._show_popup(lines)
+    assert app._panel() == lines
+
+
+def test_a_held_panel_keeps_repainting_so_the_countdown_moves(app: App) -> None:
+    app._show_popup(["REPORT", "", "[any key] back to the board"], hold=5.0)
+    app.dirty = False
+    app.tick()
+    assert app.dirty, "a frozen countdown reads as the game having hung"
+
+
+def test_the_hold_grows_with_how_much_there_is_to_read() -> None:
+    from client import hud
+    from protocol.rounds import BattleReport
+
+    one = hud.reveal_hold([BattleReport(territory=0)])
+    many = hud.reveal_hold([BattleReport(territory=i) for i in range(5)])
+    assert 0 < one < many <= hud.REVEAL_HOLD_LIMIT
+
+
+def test_a_phase_with_nothing_to_report_is_not_held_at_all() -> None:
+    from client import hud
+
+    assert hud.reveal_hold([], []) == 0.0, "there is nothing to protect from a stray key"
+
+
+# --------------------------------------------------------------------------
+# A lit territory has to be able to say what happened to it
+# --------------------------------------------------------------------------
+
+
+def test_hovering_a_marked_territory_says_what_happened(app: App) -> None:
+    app.battle_notes = {1: "you took it from Guus"}
+    point_at(app, 1)
+    app.refresh_hover()
+    assert "you took it from Guus" in app.hover
+
+
+def test_an_unmarked_territory_says_nothing_extra(app: App) -> None:
+    app.battle_notes = {1: "you took it from Guus"}
+    point_at(app, 0)
+    app.refresh_hover()
+    assert "took it" not in app.hover
+
+
+def test_a_marked_territory_gives_up_its_terrain_detail_for_the_note(app: App) -> None:
+    """The line is shared with the key hints; the note earns the space."""
+    point_at(app, 1)
+    app.refresh_hover()
+    assert "height" in app.hover
+
+    app.battle_notes = {1: "Guus took it from you"}
+    app.refresh_hover()
+    assert "height" not in app.hover
+    assert "Guus took it from you" in app.hover
+
+
+def test_the_keyboard_pick_reports_the_note_too(app: App) -> None:
+    app.battle_notes = {2: "you held it"}
+    app.cursor = None
+    app.selected = 2
+    app.refresh_hover()
+    assert "you held it" in app.hover
+
+
+def test_a_marked_territory_is_reachable_with_the_keyboard(app: App, me: UUID) -> None:
+    """Ground taken off you outright borders nothing of yours any more."""
+    stranger = uuid4()
+    app.world.territories[1].owner = stranger
+    app.world.territories[1].land_neighbours = set()
+    app.world.territories[0].land_neighbours = {2}
+    app.world.territories[2].land_neighbours = {0}
+
+    assert 1 not in app._selectable(), "nothing of yours touches it"
+    app.battle_notes = {1: "Guus took it from you"}
+    assert 1 in app._selectable(), "reading the mark should not need a mouse"
+
+
+def test_a_marked_territory_is_only_offered_once(app: App) -> None:
+    app.battle_notes = {0: "you held it"}
+    options = app._selectable()
+    assert options.count(0) == 1
+
+
+def test_marks_are_lit_on_the_board(app: App) -> None:
+    app.battle_notes = {1: "you took it from Guus"}
+    app.refresh_hover()
+    assert app.highlights.get(1) == (200, 110, 45)
+
+
+def test_the_pick_is_drawn_over_a_mark(app: App) -> None:
+    """The pick is what you are doing now; a mark already happened."""
+    app.battle_notes = {1: "you took it from Guus"}
+    app.selected = 1
+    app.refresh_hover()
+    assert app.highlights[1] == (245, 245, 245)
+
+
+def test_the_key_hints_survive_an_overlong_hover() -> None:
+    """`Screen.row` cuts at the width; the keys must not be what it cuts."""
+    from client.hud import bottom_bar
+
+    keys = "  [?] help  [q]uit "
+    bar = bottom_bar("x" * 500, keys, width=100)
+    assert bar.endswith(keys), "the only thing on screen saying what a player can do"
+    assert len(bar) == 100
+
+
+def test_a_short_hover_is_left_alone() -> None:
+    from client.hud import bottom_bar
+
+    bar = bottom_bar("grass", "  [q]uit ", width=100)
+    assert bar.startswith(" grass")
+    assert bar.endswith("  [q]uit ")
+
+
+def test_a_terminal_narrower_than_the_keys_keeps_the_keys() -> None:
+    from client.hud import bottom_bar
+
+    keys = "  [?] help  [q]uit "
+    assert bottom_bar("anything", keys, width=4) == keys

@@ -211,3 +211,17 @@ def test_placing_takes_back_being_finished(alice: UUID, bob: UUID) -> None:
     round_.finish(alice)
     round_.place(alice, 0, 1)
     assert not round_.progress[alice].done
+
+
+def test_clearing_a_plan_takes_back_being_finished(alice: UUID, bob: UUID) -> None:
+    """Otherwise the room advances the phase out from under somebody who has
+    nothing committed and has just said so."""
+    round_ = game(alice, bob)
+    round_.phase = "commanding"
+    round_.progress[alice].troops = 5
+    round_.place(alice, 0, 3)
+    round_.finish(alice)
+
+    round_.cancel_plan(alice)
+    assert round_.progress[alice].troops == 5, "the troops come back"
+    assert not round_.progress[alice].done, "and so does the decision"

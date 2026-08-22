@@ -40,6 +40,8 @@ from protocol import (
     dump_frame,
     parse_frame,
 )
+from protocol.actions import version_complaint
+from protocol.core import PROTOCOL_VERSION
 from protocol.lobby import Lobby, LobbyPlayer, clean_name
 from protocol.terrain import World, WorldMap
 from server import combat, sandbox
@@ -122,7 +124,14 @@ class Server:
         """Answer one request. Returning the response keeps correlation out of
         the game logic - the caller tags it with the id it came in on."""
         match request:
-            case Join(name=name):
+            case Join(name=name, version=version):
+                # Before anything else, including whether a game is running: a
+                # peer that cannot read the answers has no use for any of them.
+                complaint = version_complaint(version, peer="client")
+                if complaint is not None:
+                    logger.info(f"turning away {name!r} from {_short(ws.id)}: {complaint}")
+                    return JoinRejected(reason=complaint)
+
                 if self.in_progress:
                     logger.info(f"turning away {name!r} from {_short(ws.id)}: a game is already running")
                     return JoinRejected(reason="a game is already in progress")
@@ -149,7 +158,7 @@ class Server:
                 # To everyone else, so the joiner is not told twice - it has
                 # the same roster on its `Joined`.
                 await self.broadcast(LobbyChanged(lobby=lobby), exclude=ws)
-                return Joined(player_id=str(player_id), lobby=lobby)
+                return Joined(player_id=str(player_id), lobby=lobby, version=PROTOCOL_VERSION)
 
             case SetReady(ready=ready):
                 player_id = self.sessions.get(ws)

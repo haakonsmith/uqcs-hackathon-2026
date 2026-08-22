@@ -196,3 +196,50 @@ def test_every_line_fits_a_narrow_terminal() -> None:
     lost = DroppedOrder(player=THEM, name="M" * 16, territory=1, count=999, reason="no longer yours when the phase ended")
     for line in battles_popup([_fight(ME, 5)], [lost], world, ME):
         assert len(line) <= 60, line
+
+
+# --------------------------------------------------------------------------
+# The short form the board hover uses
+# --------------------------------------------------------------------------
+
+
+def test_mark_note_says_which_way_the_ground_went() -> None:
+    from client.hud import mark_note
+
+    assert mark_note(_fight(ME, 5, defender=THEM), ME) == "you took it from Guus"
+    assert mark_note(_fight(THEM, 5, defender=ME), ME) == "Guus took it from you"
+    assert mark_note(_fight(ME, 5, defender=ME), ME) == "you held it"
+    assert mark_note(_fight(ME, 5, defender=None), ME) == "you took empty ground"
+
+
+def test_mark_note_covers_a_wipe_out() -> None:
+    from client.hud import mark_note
+
+    assert mark_note(_fight(None, 0, defender=ME), ME) == "wiped out - was yours"
+    assert mark_note(_fight(None, 0, defender=None), ME) == "wiped out"
+
+
+def test_mark_note_leaves_out_the_count_the_board_already_shows() -> None:
+    from client.hud import mark_note
+
+    assert "5" not in mark_note(_fight(ME, 5, defender=THEM), ME)
+
+
+def test_mark_note_stays_within_two_names_and_a_verb() -> None:
+    """The worst case is a fight between two strangers with maximal names."""
+    from client.hud import mark_note
+    from protocol.lobby import MAX_NAME_LENGTH
+
+    longest = _fight(THEM, 5, defender=ME)
+    object.__setattr__(longest, "winner_name", "M" * MAX_NAME_LENGTH)
+    object.__setattr__(longest, "defender_name", "N" * MAX_NAME_LENGTH)
+    assert len(mark_note(longest, OTHER)) <= 2 * MAX_NAME_LENGTH + len(" took it from ")
+
+
+def test_dropped_note_names_whose_troops_were_lost() -> None:
+    from client.hud import dropped_note
+
+    mine = DroppedOrder(player=ME, name="Haakon", territory=0, count=4, reason="out of reach")
+    theirs = DroppedOrder(player=THEM, name="Guus", territory=0, count=2, reason="out of reach")
+    assert dropped_note(mine, ME) == "4 of yours never landed"
+    assert dropped_note(theirs, ME) == "2 of Guus's never landed"

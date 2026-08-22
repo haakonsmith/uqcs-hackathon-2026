@@ -17,7 +17,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field, TypeAdapter
 
-from protocol.core import Request
+from protocol.core import PROTOCOL_VERSION, UNVERSIONED, Request
 from protocol.lobby import Lobby
 from protocol.rounds import BattleReport, DroppedOrder, Placement, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
@@ -37,6 +37,10 @@ class Joined:
 
     player_id: str
     lobby: Lobby
+    # Echoed so the client can check the server too. A server older than the
+    # client accepts the join - it has no version field to object to - and then
+    # breaks at whichever later message changed, so the answer has to carry it.
+    version: int = UNVERSIONED
     kind: Literal["joined"] = "joined"
 
 
@@ -105,6 +109,21 @@ class Echoed:
 # --------------------------------------------------------------------------
 
 
+def version_complaint(theirs: int, peer: str, ours: int = PROTOCOL_VERSION) -> str | None:
+    """Why these two ends cannot talk, or None if they can.
+
+    `peer` names the other end from the caller's point of view - a server says
+    "client", a client says "server" - so the message can name the machine to
+    go and update. "Protocol mismatch" on its own sends everybody to look at
+    the wrong one.
+    """
+    if theirs == ours:
+        return None
+    spoken = f"v{theirs}" if theirs != UNVERSIONED else "a version older than the handshake"
+    stale = f"the {peer}" if theirs < ours else "this end"
+    return f"this end speaks protocol v{ours}, the {peer} speaks {spoken} - update {stale}"
+
+
 @dataclass(frozen=True)
 class Join(Request[Joined | JoinRejected]):
     """Ask to be let into a room under a name.
@@ -117,6 +136,9 @@ class Join(Request[Joined | JoinRejected]):
 
     room: str
     name: str = "Player"
+    # Defaulted rather than required, so a client too old to send one is a
+    # readable refusal at the door instead of a parse error on the way in.
+    version: int = UNVERSIONED
     action: Literal["join"] = "join"
 
 

@@ -7,6 +7,8 @@ frame changes hardly at all.
 
 from __future__ import annotations
 
+import math
+
 from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
 from protocol import terrain
@@ -278,6 +280,43 @@ def _outcome(battle: BattleReport, me: str) -> str:
     return f"{taker} took it from {loser}, {left}"
 
 
+def bottom_bar(hover: str, keys: str, width: int) -> str:
+    """The hover slot and the key hints, sharing one row.
+
+    The keys keep their room and the hover gives way. `Screen.row` cuts at the
+    terminal width, so without a budget an overlong hover takes the key hints
+    off the right-hand end with it - and the hover is passing detail where the
+    keys are the only thing on screen saying what a player can do.
+    """
+    return f" {hover}"[: max(0, width - len(keys))] + keys
+
+
+def mark_note(battle: BattleReport, me: str) -> str:
+    """The shortest true thing about a battle, for the hover slot.
+
+    The popup's sentence is too long for a line it has to share with the key
+    hints, and the count of survivors is on the territory anyway - the garrison
+    beside it is that number. What is left is the part the board cannot show:
+    which way the ground went, and who it went from.
+    """
+    if battle.winner is None:
+        whose = "yours" if battle.defender == me else f"{battle.defender_name}'s"
+        return f"wiped out - was {whose}" if battle.defender is not None else "wiped out"
+    taker = "you" if battle.winner == me else battle.winner_name
+    if battle.held:
+        return f"{taker} held it"
+    if battle.defender is None:
+        return f"{taker} took empty ground"
+    loser = "you" if battle.defender == me else battle.defender_name
+    return f"{taker} took it from {loser}"
+
+
+def dropped_note(order: DroppedOrder, me: str) -> str:
+    """The same, for troops that never made it onto the board."""
+    whose = "yours" if order.player == me else f"{order.name}'s"
+    return f"{order.count} of {whose} never landed"
+
+
 def battles_popup(
     battles: list[BattleReport],
     dropped: list[DroppedOrder] | None = None,
@@ -329,6 +368,32 @@ def battles_popup(
         lines.pop()
 
     return [*lines, "", "the board marks these until you next command", "[any key] back to the board"]
+
+
+# A reveal lands on top of whatever the player was doing - the phase ends on
+# the server's clock, not on theirs - so without a hold it is dismissed by the
+# key they were already pressing. A longer report earns proportionally longer,
+# up to a cap: a whole board's worth of fighting is a lot to take in.
+REVEAL_HOLD_SECONDS = 4.0
+REVEAL_HOLD_PER_BATTLE = 1.5
+REVEAL_HOLD_LIMIT = 20.0
+
+# The winner's panel ends the game, so there is nothing to get back to.
+GAME_OVER_HOLD_SECONDS = 12.0
+
+
+def reveal_hold(battles: list[BattleReport], dropped: list[DroppedOrder] | None = None) -> float:
+    """Seconds `battles_popup` should stay up before it can be dismissed."""
+    entries = len(battles) + len(dropped or [])
+    if not entries:
+        # Nothing to read, so nothing to protect from a stray keystroke.
+        return 0.0
+    return min(REVEAL_HOLD_LIMIT, REVEAL_HOLD_SECONDS + REVEAL_HOLD_PER_BATTLE * entries)
+
+
+def hold_notice(seconds: float) -> str:
+    """Replaces a popup's dismiss hint for as long as the hint would be a lie."""
+    return f"[any key] in {math.ceil(seconds)}s"
 
 
 def game_over_popup(name: str, winner: str | None) -> list[str]:

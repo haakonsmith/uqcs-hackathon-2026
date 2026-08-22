@@ -110,6 +110,29 @@ class WorldMap:
     def owned_by(self, player: UUID) -> list[Territory]:
         return [t for t in self.territories if t.owner == player]
 
+    def borders(self, player: UUID | None, territory_id: int) -> bool:
+        """Whether the player holds anything the territory touches."""
+        if player is None or not 0 <= territory_id < len(self.territories):
+            return False
+        return any(self.territories[n].owner == player for n in self.territories[territory_id].neighbours)
+
+    def within_reach(self, player: UUID | None, territory_id: int) -> bool:
+        """Whether a player may place troops here: theirs, or touching theirs.
+
+        On the board rather than on either side of the wire, because both ends
+        need the same answer. The server refuses a placement out of reach; the
+        client greys one out before asking. Two copies of the rule drifting
+        apart shows up as a click that looks like it missed, which is the
+        version of being refused that reads as the game being broken.
+
+        Unknown ids are out of reach rather than an error. A caller that wants
+        "no such territory" said out loud has to check for it, and both of
+        them do - this is the reach question only.
+        """
+        if player is None or not 0 <= territory_id < len(self.territories):
+            return False
+        return self.territories[territory_id].owner == player or self.borders(player, territory_id)
+
 
 # --------------------------------------------------------------------------
 # The same board, flattened for the wire

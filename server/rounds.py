@@ -214,9 +214,13 @@ class Round:
         return progress.troops
 
     def cancel_plan(self, player_id: UUID) -> None:
-        """Tear up the phase: orders forgotten, placed troops back in hand."""
+        """Tear up the phase: placed troops go back into hand."""
         progress = self._require(player_id)
         progress.troops += self.plan.clear(player_id)
+        # Same reasoning as `place`: a player who has just thrown their plan
+        # away has something left to decide. Leaving them finished let a room
+        # advance the phase out from under somebody who had nothing committed.
+        progress.done = False
 
     def placements_for(self, player_id: UUID) -> list[Placement]:
         return self.plan.placements_for(player_id)

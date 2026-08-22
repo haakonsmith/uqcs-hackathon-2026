@@ -93,8 +93,8 @@ def check_placement(board: WorldMap, player: UUID, territory_id: int, count: int
     Reach, not ownership: troops may also be dropped on a neighbour of
     something the player holds, which resolves as an assault on it.
     """
-    territory = _territory(board, territory_id)
-    if territory.owner != player and not _borders(board, player, territory):
+    _ = _territory(board, territory_id)
+    if not board.within_reach(player, territory_id):
         raise IllegalMove(f"territory {territory_id} is neither yours nor next to yours")
     if count < 1:
         raise IllegalMove("place at least one soldier")
@@ -120,7 +120,7 @@ def resolve(board: WorldMap, plan: Plan, names: dict[UUID, str]) -> Resolution:
             territory = board.territories[territory_id]
             if territory.owner == player:
                 territory.soldiers += count
-            elif _borders(board, player, territory):
+            elif board.borders(player, territory_id):
                 arrivals[territory_id][player] += count
             else:
                 drop(player, territory_id, count, "out of reach when the phase ended")
@@ -197,11 +197,6 @@ def _settle(
 def eliminated(board: WorldMap, player: UUID) -> bool:
     """True once a player holds no ground at all."""
     return not any(t.owner == player for t in board.territories)
-
-
-def _borders(board: WorldMap, player: UUID, territory: Territory) -> bool:
-    """True when the player holds something the territory touches."""
-    return any(board.territories[n].owner == player for n in territory.neighbours)
 
 
 def _name(owner: UUID | None, names: dict[UUID, str]) -> str:

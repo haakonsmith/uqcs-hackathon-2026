@@ -80,7 +80,7 @@ from client.menu import (
 )
 from client.palette import Factions
 from client.state import App
-from protocol import Connection, Join, JoinRejected
+from protocol import PROTOCOL_VERSION, Connection, Join, JoinRejected, version_complaint
 from protocol.lobby import MAX_NAME_LENGTH
 
 
@@ -147,9 +147,18 @@ async def join(
         forwarder = asyncio.create_task(pump_server(conn.events, events))
         try:
             notice(term, "JOINING", "", address, f"as {username}")
-            joined = await conn.send(Join(room="lobby", name=username))
+            joined = await conn.send(Join(room="lobby", name=username, version=PROTOCOL_VERSION))
             if isinstance(joined, JoinRejected):
                 await alert(term, events, "JOIN REFUSED", "", joined.reason)
+                return
+
+            # The server may be the older end, in which case it had no version
+            # field to object to and let us in regardless. Checking its answer
+            # is the only way that direction gets caught at the door instead of
+            # at whichever later message happens to have changed.
+            complaint = version_complaint(joined.version, peer="server")
+            if complaint is not None:
+                await alert(term, events, "OUT OF DATE", "", complaint)
                 return
 
             # The board does not exist until the lobby says go, and the server
