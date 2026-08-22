@@ -19,6 +19,7 @@ from pydantic import Field, TypeAdapter
 
 from protocol.core import Request
 from protocol.lobby import Lobby
+from protocol.rounds import BattleReport, MoveOrder, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
 
 # --------------------------------------------------------------------------
@@ -54,6 +55,49 @@ class JoinRejected:
 
 
 @dataclass(frozen=True)
+class Judged:
+    """The verdict on one submission, and the round it left behind."""
+
+    verdict: Verdict
+    round: RoundState
+    kind: Literal["judged"] = "judged"
+
+
+@dataclass(frozen=True)
+class Placed:
+    """Troops accepted onto the board, with what is left to place."""
+
+    round: RoundState
+    remaining: int
+    kind: Literal["placed"] = "placed"
+
+
+@dataclass(frozen=True)
+class Ordered:
+    """Marching orders accepted. Nothing moves until the phase ends."""
+
+    orders: list[MoveOrder]
+    round: RoundState
+    kind: Literal["ordered"] = "ordered"
+
+
+@dataclass(frozen=True)
+class Refused:
+    """A move the rules do not allow. The board is unchanged."""
+
+    reason: str
+    kind: Literal["refused"] = "refused"
+
+
+@dataclass(frozen=True)
+class Acknowledged:
+    """A request that changed nothing but the round state."""
+
+    round: RoundState
+    kind: Literal["acknowledged"] = "acknowledged"
+
+
+@dataclass(frozen=True)
 class Echoed:
     text: str
     kind: Literal["echoed"] = "echoed"
@@ -77,6 +121,51 @@ class SetReady(Request[ReadySet]):
 
     ready: bool = True
     action: Literal["set_ready"] = "set_ready"
+
+
+@dataclass(frozen=True)
+class SubmitSolution(Request[Judged | Refused]):
+    """Try a solution. Allowed as many times as the phase has seconds left."""
+
+    code: str
+    action: Literal["submit_solution"] = "submit_solution"
+
+
+@dataclass(frozen=True)
+class PlaceTroops(Request[Placed | Refused]):
+    """Put `count` of this round's troops onto a territory already owned."""
+
+    territory: int
+    count: int = 1
+    action: Literal["place_troops"] = "place_troops"
+
+
+@dataclass(frozen=True)
+class MoveTroops(Request[Ordered | Refused]):
+    """Order troops to a neighbouring territory, friendly or not.
+
+    Queued rather than applied: everybody's orders resolve together when the
+    phase ends, so two players can march into the same place at once.
+    """
+
+    source: int
+    target: int
+    count: int
+    action: Literal["move_troops"] = "move_troops"
+
+
+@dataclass(frozen=True)
+class CancelOrders(Request[Ordered | Refused]):
+    """Tear up this player's orders for the phase."""
+
+    action: Literal["cancel_orders"] = "cancel_orders"
+
+
+@dataclass(frozen=True)
+class FinishPhase(Request[Acknowledged | Refused]):
+    """Say this player is done, so the phase can end before its clock does."""
+
+    action: Literal["finish_phase"] = "finish_phase"
 
 
 @dataclass(frozen=True)
@@ -114,6 +203,43 @@ class GameStarted:
     kind: Literal["game_started"] = "game_started"
 
 
+@dataclass(frozen=True)
+class RoundChanged:
+    """A new round, a new phase, or somebody's progress within one."""
+
+    round: RoundState
+    kind: Literal["round_changed"] = "round_changed"
+
+
+@dataclass(frozen=True)
+class BoardChanged:
+    """Territories that moved, as a delta rather than a fresh board."""
+
+    updates: list[TerritoryUpdate]
+    kind: Literal["board_changed"] = "board_changed"
+
+
+@dataclass(frozen=True)
+class GameOver:
+    """One player holds the whole board. The round loop has stopped."""
+
+    winner: str
+    name: str
+    kind: Literal["game_over"] = "game_over"
+
+
+@dataclass(frozen=True)
+class MovesResolved:
+    """The phase ended and every order was carried out at once.
+
+    Only contested territories get a report; a march into empty ground of your
+    own is just a board delta.
+    """
+
+    battles: list[BattleReport]
+    kind: Literal["moves_resolved"] = "moves_resolved"
+
+
 # --------------------------------------------------------------------------
 # Unions
 # --------------------------------------------------------------------------
@@ -121,9 +247,18 @@ class GameStarted:
 # Annotated rather than `type` aliases: pydantic needs the discriminator to
 # switch on the tag instead of trying each member in turn, which is both faster
 # and gives an error naming the tag rather than every failed candidate.
-ClientRequest = Annotated[Join | SetReady | Echo, Field(discriminator="action")]
-ServerResponse = Annotated[Joined | JoinRejected | ReadySet | Echoed, Field(discriminator="kind")]
-ServerEvent = Annotated[LobbyChanged | GameStarted, Field(discriminator="kind")]
+ClientRequest = Annotated[
+    Join | SetReady | SubmitSolution | PlaceTroops | MoveTroops | CancelOrders | FinishPhase | Echo,
+    Field(discriminator="action"),
+]
+ServerResponse = Annotated[
+    Joined | JoinRejected | ReadySet | Judged | Placed | Ordered | Acknowledged | Refused | Echoed,
+    Field(discriminator="kind"),
+]
+ServerEvent = Annotated[
+    LobbyChanged | GameStarted | RoundChanged | BoardChanged | MovesResolved | GameOver,
+    Field(discriminator="kind"),
+]
 
 REQUEST_ADAPTER: TypeAdapter[ClientRequest] = TypeAdapter(ClientRequest)
 RESPONSE_ADAPTER: TypeAdapter[ServerResponse] = TypeAdapter(ServerResponse)

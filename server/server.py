@@ -10,27 +10,45 @@ from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 
 from protocol import (
+    Acknowledged,
+    BoardChanged,
+    CancelOrders,
     ClientRequest,
     Echo,
     Echoed,
     EvtFrame,
+    FinishPhase,
+    GameOver,
     GameStarted,
     Join,
     Joined,
     JoinRejected,
+    Judged,
     LobbyChanged,
+    MovesResolved,
+    MoveTroops,
+    Ordered,
+    Placed,
+    PlaceTroops,
     ReadySet,
+    Refused,
     ReqFrame,
     ResFrame,
+    RoundChanged,
     ServerEvent,
     ServerResponse,
     SetReady,
+    SubmitSolution,
     dump_frame,
     parse_frame,
 )
 from protocol.lobby import Lobby, LobbyPlayer
+from protocol.terrain import World, WorldMap
+from server import combat
+from server.judge import Judge, PlaceholderJudge
 from server.player import Player
-from server.world import World, create_world
+from server.rounds import Round
+from server.world import generate
 
 logger = logging.getLogger("Server")
 
@@ -42,6 +60,10 @@ DEFAULT_PORT = 8888
 
 # The game will not start below this many players, however eager they are.
 MIN_PLAYERS = 2
+
+# How often the round clock checks whether the phase is over. Fine enough
+# that a countdown looks right, coarse enough to cost nothing.
+CLOCK_TICK = 0.5
 
 
 def _short(value: object) -> str:
@@ -58,10 +80,11 @@ class Server:
     connections: set[websockets.ServerConnection]
     players: dict[UUID, Player]
     sessions: dict[websockets.ServerConnection, UUID]
-    map: World | None
+    board: WorldMap | None
+    round: Round | None
     player_count: int
 
-    def __init__(self) -> None:
+    def __init__(self, judge: Judge | None = None) -> None:
         self.connections: set[websockets.ServerConnection] = set()
         self.players: dict[UUID, Player] = {}
         # Which player a socket is logged in as, so a drop can be announced.
@@ -70,8 +93,17 @@ class Server:
         # No board until the lobby says go. Generating one up front would deal
         # territories to players who never turned up, and take the count of
         # them from a constant rather than from who is actually in the room.
-        self.map: World | None = None
+        self.board: WorldMap | None = None
+        self.round: Round | None = None
+        self.clock: asyncio.Task[None] | None = None
+        # Injected so a test can judge instantly, and so the sandboxed runner
+        # can replace the placeholder without this file changing.
+        self.judge: Judge = judge or PlaceholderJudge()
         self.player_count = 4
+
+    @property
+    def in_progress(self) -> bool:
+        return self.round is not None
 
     def lobby(self) -> Lobby:
         """The roster as the clients see it. Insertion order is join order."""
@@ -93,7 +125,7 @@ class Server:
         the game logic - the caller tags it with the id it came in on."""
         match request:
             case Join(name=name):
-                if self.map is not None:
+                if self.in_progress:
                     logger.info(f"turning away {name!r} from {_short(ws.id)}: a game is already running")
                     return JoinRejected(reason="a game is already in progress")
 
@@ -129,6 +161,64 @@ class Server:
                 # so a client is never handed a game mid-request.
                 return ReadySet(lobby=lobby)
 
+            case SubmitSolution(code=code):
+                player = self._player(ws)
+                if player is None or self.round is None:
+                    return Refused(reason="no game in progress")
+                try:
+                    verdict = await self.round.submit(player.id, code)
+                except combat.IllegalMove as error:
+                    return Refused(reason=str(error))
+
+                logger.info(f"{_label(player)} submitted #{self.round.progress[player.id].submissions}: {verdict.summary()}")
+                await self.broadcast(RoundChanged(round=self.round.state()))
+                return Judged(verdict=verdict, round=self.round.state())
+
+            case PlaceTroops(territory=territory, count=count):
+                player = self._player(ws)
+                if player is None or self.round is None:
+                    return Refused(reason="no game in progress")
+                try:
+                    remaining = self.round.place(player.id, territory, count)
+                except combat.IllegalMove as error:
+                    return Refused(reason=str(error))
+
+                logger.info(f"{_label(player)} placed {count} on territory {territory}, {remaining} left")
+                await self.broadcast(BoardChanged(updates=self.round.updates((territory,))))
+                await self.broadcast(RoundChanged(round=self.round.state()))
+                return Placed(round=self.round.state(), remaining=remaining)
+
+            case MoveTroops(source=source, target=target, count=count):
+                player = self._player(ws)
+                if player is None or self.round is None:
+                    return Refused(reason="no game in progress")
+                try:
+                    orders = self.round.order(player.id, source, target, count)
+                except combat.IllegalMove as error:
+                    return Refused(reason=str(error))
+
+                logger.info(f"{_label(player)} ordered {count} from {source} to {target} ({len(orders)} orders)")
+                # Deliberately not broadcast: orders stay secret until they
+                # land, or marching into somebody is never a surprise.
+                return Ordered(orders=orders, round=self.round.state())
+
+            case CancelOrders():
+                player = self._player(ws)
+                if player is None or self.round is None:
+                    return Refused(reason="no game in progress")
+                logger.info(f"{_label(player)} tore up their orders")
+                return Ordered(orders=self.round.cancel_orders(player.id), round=self.round.state())
+
+            case FinishPhase():
+                player = self._player(ws)
+                if player is None or self.round is None:
+                    return Refused(reason="no game in progress")
+                self.round.finish(player.id)
+                state = self.round.state()
+                logger.info(f"{_label(player)} finished {state.phase} - waiting on {state.waiting_on()}")
+                await self.broadcast(RoundChanged(round=state), exclude=ws)
+                return Acknowledged(round=state)
+
             case Echo(text=text):
                 logger.debug(f"echo from {_short(ws.id)}: {text!r}")
                 return Echoed(text=text)
@@ -142,7 +232,7 @@ class Server:
         Deals to exactly the players in the room, so a three-player game is a
         three-way split rather than a four-way one with an empty share.
         """
-        if self.map is not None:
+        if self.in_progress:
             return
         if not self.lobby().can_start:
             logger.debug(f"not starting yet - {self.lobby().waiting_for()}")
@@ -151,13 +241,70 @@ class Server:
         ids = list(self.players)
         logger.info(f"all {len(ids)} players ready - generating the board")
         started = time.perf_counter()
-        self.map = create_world(players=ids, player_count=len(ids))
+        self.board = generate(width=80, height=40, players=ids, player_count=len(ids))
         elapsed = (time.perf_counter() - started) * 1000
         logger.info(
-            f"board ready in {elapsed:.0f} ms: {self.map.width}x{self.map.height},"
-            f" {len(self.map.territories)} territories across {len(self.map.owners)} players"
+            f"board ready in {elapsed:.0f} ms: {self.board.width}x{self.board.height},"
+            f" {len(self.board.territories)} territories across {len(self.board.owners)} players"
         )
-        await self.broadcast(GameStarted(world=self.map))
+
+        self.round = Round(board=self.board, judge=self.judge)
+        self.round.start({p.id: p.name for p in self.players.values()})
+
+        # The board goes out once, in full; everything after it is a delta.
+        await self.broadcast(GameStarted(world=World.from_map(self.board)))
+        await self.broadcast(RoundChanged(round=self.round.state()))
+        self.clock = asyncio.create_task(self._run_clock())
+
+    async def _run_clock(self) -> None:
+        """Move the round on when its phase runs out, or everyone is done.
+
+        A poll rather than a timer per phase: a phase can also end early, and
+        one loop that asks "is it over yet" handles both without a timer to
+        cancel and reschedule on every move.
+        """
+        try:
+            while self.round is not None:
+                await asyncio.sleep(CLOCK_TICK)
+                if self.round is not None and self.round.should_advance():
+                    await self._advance()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("the round clock stopped")
+
+    async def _advance(self) -> None:
+        """Close the phase that just ended and announce the next one."""
+        if self.round is None:
+            return
+
+        winner_id = self.round.winner()
+        if winner_id is not None:
+            await self._finish_game(winner_id)
+            return
+
+        before = self.round.phase
+        resolution = self.round.advance()
+        if resolution is not None:
+            # Board first, then the story: a client that draws the report
+            # before the delta would describe a board it is not showing.
+            await self.broadcast(BoardChanged(updates=self.round.updates(resolution.touched)))
+            await self.broadcast(MovesResolved(battles=resolution.battles))
+
+        state = self.round.state()
+        logger.info(f"round {state.number}: {before} -> {state.phase} ({state.seconds_left:.0f}s)")
+        await self.broadcast(RoundChanged(round=state))
+
+    async def _finish_game(self, winner_id: UUID) -> None:
+        winner = self.players.get(winner_id)
+        name = winner.name if winner is not None else _short(winner_id)
+        logger.info(f"{name} holds the whole board - game over")
+        self.round = None
+        await self.broadcast(GameOver(winner=str(winner_id), name=name))
+
+    def _player(self, ws: websockets.ServerConnection) -> Player | None:
+        player_id = self.sessions.get(ws)
+        return self.players.get(player_id) if player_id is not None else None
 
     async def broadcast(self, event: ServerEvent, exclude: websockets.ServerConnection | None = None) -> None:
         """Push an event to everyone, dropping those that disconnect mid-send."""
@@ -228,7 +375,10 @@ class Server:
                 gone = self.players.pop(player_id, None)
                 name = _label(gone) if gone is not None else _short(player_id)
                 logger.info(f"{name} left - {self.roster()}")
-                if self.map is not None:
+                if self.round is not None:
+                    # Forget them in the round too, or every phase runs its
+                    # full clock waiting on somebody who is not coming back.
+                    self.round.drop(player_id)
                     logger.warning(f"{name} left a game in progress; their territories are now unplayed")
                 await self.broadcast(LobbyChanged(lobby=self.lobby()))
 

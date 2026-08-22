@@ -73,8 +73,3 @@ def render(
         parts.append(term.clear_eol)
         lines.append("".join(parts))
     return "\n".join(lines)
-
-
-def status(world: terrain.WorldMap, view: Viewport, hover: str) -> str:
-    position = f"[{view.x},{view.y}] {view.span_x}x{view.span_y} of {world.width}x{world.height} @{view.zoom}x"
-    return f" {position}  {hover}   arrows/wheel scroll  +/- zoom  [o]verlay  [q]uit "

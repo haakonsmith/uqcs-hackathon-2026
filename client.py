@@ -9,6 +9,14 @@
 The menu is arrow keys or the mouse; JOIN GAME asks for a username and
 connects, SETTINGS edits the server address, EXIT (or `q`) leaves.
 
+During a round, `s` drops out to $EDITOR to write a solution and submits it on
+exit, `n` picks a territory, `space`/`p` place troops, `m` orders a march, `f`
+says you are finished with the phase and `tab` shows the scoreboard.
+
+Orders are secret until the moving phase ends, when everybody's resolve at
+once: the biggest stack in a territory takes it, losing as many troops as the
+next biggest had.
+
 Joining lands in a lobby. The server generates the board only once every
 player there has readied up, so the board arrives as a push rather than as
 part of the join.
@@ -31,7 +39,6 @@ import argparse
 import asyncio
 import contextlib
 import os
-import threading
 
 import blessed
 import websockets
@@ -40,10 +47,12 @@ from dotenv import load_dotenv
 from client.input import (
     AppEvent,
     KeyPress,
+    KeyPump,
     Received,
     Resized,
+    Tick,
     mouse_tracking,
-    pump_keys,
+    pump_clock,
     pump_server,
     watch_resize,
 )
@@ -57,20 +66,35 @@ async def play(app: App, events: asyncio.Queue[AppEvent]) -> None:
     """Run the board until the player quits or the connection drops."""
     app.fit()
     app.draw()
-    while app.running:
-        match await events.get():
-            case KeyPress(key=key):
-                app.handle_key(key)
-            case Resized():
-                app.fit()
-            case Received(event=event):
-                app.apply_event(event)
+    # Only the board needs a second hand; the menu has nothing that counts down.
+    ticker = asyncio.create_task(pump_clock(events))
+    try:
+        while app.running:
+            match await events.get():
+                case KeyPress(key=key):
+                    await app.handle_key(key)
+                case Resized():
+                    app.fit()
+                case Received(event=event):
+                    app.apply_event(event)
+                case Tick():
+                    app.tick()
 
-        if app.dirty:
-            app.draw()
+            if app.dirty:
+                app.draw()
+    finally:
+        _ = ticker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ticker
 
 
-async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address: str, username: str) -> None:
+async def join(
+    term: blessed.Terminal,
+    events: asyncio.Queue[AppEvent],
+    address: str,
+    username: str,
+    pump: KeyPump,
+) -> None:
     """Connect, join a room, then hand the board the live connection.
 
     Anything that goes wrong here is reported on the menu rather than raised:
@@ -102,7 +126,16 @@ async def join(term: blessed.Terminal, events: asyncio.Queue[AppEvent], address:
             if world is None:
                 return
 
-            await play(App(term=term, world=world.to_map()), events)
+            await play(
+                App(
+                    term=term,
+                    world=world.to_map(),
+                    conn=conn,
+                    pump=pump,
+                    me=joined.player_id,
+                ),
+                events,
+            )
         except ConnectionError as error:
             await alert(term, events, "CONNECTION LOST", "", str(error))
         finally:
@@ -198,25 +231,26 @@ def _public_address(parser: argparse.ArgumentParser) -> str:
 async def main(args: argparse.Namespace) -> None:
     term = blessed.Terminal()
     events: asyncio.Queue[AppEvent] = asyncio.Queue()
-    stop = threading.Event()
 
     set_address(args.address)
     if args.name:
         set_username(args.name)
 
     with term.fullscreen(), term.cbreak(), term.hidden_cursor(), mouse_tracking(term):
-        # One pump for both screens, so keys never go missing between them.
-        pump_keys(term, events, stop)
+        # One pump for every screen, so keys never go missing between them,
+        # and so it can be handed over wholesale to an editor.
+        pump = KeyPump(term, events)
+        pump.start()
         watch_resize(events)
         try:
             while True:
                 match await run_menu(term, events):
                     case JoinGame(address=address, username=username):
-                        await join(term, events, address, username)
+                        await join(term, events, address, username, pump)
                     case Quit():
                         return
         finally:
-            stop.set()
+            pump.stop()
 
 
 if __name__ == "__main__":
