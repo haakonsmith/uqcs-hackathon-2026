@@ -415,6 +415,15 @@ class Server:
                 logger.info(sandbox.ISOLATION.summary())
                 if not sandbox.ISOLATION.blocks_network:
                     logger.warning("no sandbox wrapper: submitted code can open sockets and write files")
+                    logger.warning("install bubblewrap (dnf install bubblewrap) and restart to fix this")
+                elif (failure := await sandbox.self_test()) is not None:
+                    # Installed but not working is the worse of the two: it
+                    # fails at the moment a player is waiting on a verdict,
+                    # not here where somebody is watching.
+                    logger.error(f"the {sandbox.ISOLATION.wrapper} sandbox is installed but did not run: {failure}")
+                    logger.error("every submission will fail until this is fixed")
+                else:
+                    logger.info(f"{sandbox.ISOLATION.wrapper} self-test passed")
             if host in ("0.0.0.0", "::"):
                 logger.warning(f"bound to {host}: reachable from the network, with no authentication")
             await asyncio.Future()

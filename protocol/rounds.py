@@ -38,13 +38,16 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # How long a phase runs before the server moves everyone on regardless.
-SUBMIT_SECONDS = 300.0
+SUBMIT_SECONDS = 60.0
 # One phase where there used to be two, so shorter than the pair it replaces
 # but longer than either: placing and marching are now planned side by side.
 COMMAND_SECONDS = 150.0
 
 # Once somebody solves the problem, how long everyone else gets to finish.
-GRACE_SECONDS = 60.0
+# Necessarily well short of `SUBMIT_SECONDS`: the grace only ever shortens the
+# deadline, so a value at or above the phase length would never shorten
+# anything and solving first would stop meaning anything at all.
+GRACE_SECONDS = 15.0
 
 type Phase = Literal["submitting", "commanding"]
 

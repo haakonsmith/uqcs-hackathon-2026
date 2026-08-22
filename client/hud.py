@@ -7,8 +7,6 @@ frame changes hardly at all.
 
 from __future__ import annotations
 
-import math
-
 from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
 from protocol.rounds import BattleReport, Phase, PlayerRound, RoundState, Verdict
@@ -17,8 +15,8 @@ from protocol.rounds import BattleReport, Phase, PlayerRound, RoundState, Verdic
 # mention: the mouse is faster, the keyboard is the one that always works on
 # a terminal with no mouse reporting. The full list lives behind [?].
 KEYS: dict[Phase, str] = {
-    "submitting": "[s]ubmit  [v] last result  [f]inished",
-    "commanding": "click to place  [m] march from here  [1-9] how many  [p] all  [c]lear  [f]inished",
+    "submitting": "[s]ubmit  [v] last panel  [f]inished",
+    "commanding": "[v] last panel  click to place  [m] march from here  [1-9] how many  [p] all  [c]lear  [f]inished",
 }
 
 # Every binding, grouped, for the [?] panel. Phase-specific first, because
@@ -26,7 +24,7 @@ KEYS: dict[Phase, str] = {
 PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
     "submitting": [
         ("[s]", "write a solution in your editor, submit when you are done"),
-        ("[v]", "show the last result again"),
+        ("[v]", "show the last panel again"),
         ("[f]", "finished - ends the phase once everyone is"),
     ],
     "commanding": [
@@ -249,29 +247,6 @@ def battles_popup(battles: list[BattleReport]) -> list[str]:
 def game_over_popup(name: str) -> list[str]:
     """The last thing the board has to say."""
     return ["GAME OVER", "", f"{name} holds the whole board", "", "[any key] back to the board"]
-
-
-# How long the reveal is held on screen before a key will put it away. This is
-# the one panel nobody chose to open - it arrives the instant the phase ends,
-# on top of whatever the player was doing - so without a hold it goes to the
-# key they were already pressing. A long report earns proportionally longer,
-# up to a cap, since a whole board's worth of fighting is a lot to take in.
-REVEAL_HOLD_SECONDS = 6.0
-REVEAL_HOLD_PER_BATTLE = 1.5
-REVEAL_HOLD_LIMIT = 25.0
-
-# The winner's panel ends the game, so there is nothing to get back to.
-GAME_OVER_HOLD_SECONDS = 12.0
-
-
-def reveal_hold(battles: list[BattleReport]) -> float:
-    """Seconds `battles_popup` should stay up before it can be dismissed."""
-    return min(REVEAL_HOLD_LIMIT, REVEAL_HOLD_SECONDS + REVEAL_HOLD_PER_BATTLE * len(battles))
-
-
-def hold_notice(seconds: float) -> str:
-    """Replaces a popup's dismiss hint for as long as the hint would be a lie."""
-    return f"[any key] in {math.ceil(seconds)}s"
 
 
 def scoreboard(round_state: RoundState | None, me: str) -> list[str]:
