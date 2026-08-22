@@ -24,7 +24,12 @@ part of the join.
 The board is larger than the terminal, so only a slice is on screen. Arrow
 keys and the mouse wheel scroll it (shift+wheel scrolls sideways), `+` and
 `-` zoom in and out by subsampling, the mouse inspects the cell under the
-cursor, `o` toggles the ownership overlay, `q` quits.
+cursor, `o` toggles the ownership overlay, `l` the legend of who is who,
+`q` quits.
+
+Every player's ground is outlined in their own colour, the local player in
+allied blue. The colours are chosen by each client for itself - see
+`client.palette`.
 
 One event loop and one key pump serve both screens: every source posts a
 tagged `AppEvent` onto a single queue, so each screen is an `await get()` and
@@ -58,6 +63,7 @@ from client.input import (
 )
 from client.lobby import run_lobby
 from client.menu import DEFAULT_ADDRESS, JoinGame, Quit, alert, notice, run_menu, set_address, set_username
+from client.palette import Factions
 from client.state import App
 from protocol import Connection, Join, JoinRejected
 
@@ -122,20 +128,16 @@ async def join(
             # The board does not exist until the lobby says go, and the server
             # is the only end that generates one - two ends generating
             # separately would disagree the moment a parameter drifted.
-            world = await run_lobby(term, events, conn, joined.lobby, joined.player_id)
-            if world is None:
+            started = await run_lobby(term, events, conn, joined.lobby, joined.player_id)
+            if started is None:
                 return
 
-            await play(
-                App(
-                    term=term,
-                    world=world.to_map(),
-                    conn=conn,
-                    pump=pump,
-                    me=joined.player_id,
-                ),
-                events,
-            )
+            world, lobby = started
+            board = world.to_map()
+            # Colours are picked here rather than sent with the board: they are
+            # presentation, and which side counts as "ours" is only known here.
+            factions = Factions.assign(board, joined.player_id, lobby.players)
+            await play(App(term=term, world=board, factions=factions), events)
         except ConnectionError as error:
             await alert(term, events, "CONNECTION LOST", "", str(error))
         finally:

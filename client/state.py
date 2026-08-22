@@ -15,10 +15,9 @@ from uuid import UUID
 import blessed
 from blessed.keyboard import Keystroke
 
-from client import hud
-from client.editor import Draft, NoEditor, edit
-from client.input import SCROLL_KEYS, KeyPump, wheel_delta
-from client.render import Highlight, render
+from client.input import SCROLL_KEYS, wheel_delta
+from client.palette import Factions
+from client.render import Highlight, legend_panel, render, status
 from client.viewport import Viewport
 from protocol import (
     Acknowledged,
@@ -73,6 +72,7 @@ def _wrap(text: str, width: int = 68) -> list[str]:
         lines.append(current)
     return lines
 
+
 # Status bars under the board: the round, then the hover text and keys.
 HUD_ROWS = 2
 
@@ -81,8 +81,10 @@ HUD_ROWS = 2
 class App:
     term: blessed.Terminal
     world: terrain.WorldMap
+    factions: Factions
     view: Viewport = field(default_factory=Viewport)
     overlay: bool = False
+    legend: bool = True
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
     highlights: dict[int, Highlight] = field(default_factory=dict)
@@ -159,7 +161,9 @@ class App:
             return
 
         owner = self.world.territories[cell.territory]
-        detail = f"territory {owner.id}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
+        side = self.factions.side_of.get(owner.id)
+        held = self.factions.label(side) if side is not None else "nobody"
+        detail = f"territory {owner.id} held by {held}, {owner.soldiers} soldiers, {len(owner.neighbours)} neighbours"
         self.hover = f"{where} - {detail}"
         self.highlights[owner.id] = True
 
@@ -193,6 +197,9 @@ class App:
 
         if key == "o":
             self.overlay = not self.overlay
+            self.dirty = True
+        elif key == "l":
+            self.legend = not self.legend
             self.dirty = True
         elif key in "+=":
             moved = self.view.set_zoom(self.view.zoom - 1, self.world)
@@ -409,20 +416,16 @@ class App:
     def draw(self) -> None:
         term, view = self.term, self.view
         print(
-            term.home + render(term, self.world, view, self.overlay, self.highlights),
+            term.home + render(term, self.world, view, self.overlay, self.highlights, self.factions),
             end="",
         )
-
-        # Two bars: what the round is doing, and what the mouse is pointing at
-        # plus the keys that work right now.
-        bars = [
-            hud.phase_line(self.round, self.me, self.message),
-            f" {hud.where(self.world, view)}  {self.hover}" + hud.key_line(self.round, self.move_from),
-        ]
-        for offset, text in enumerate(bars):
-            row = view.drawn_rows + offset
-            if row < term.height:
-                print(term.move_xy(0, row) + term.ljust(text[: term.width]), end="")
+        # After the board, because it is laid over it.
+        if self.legend:
+            print(legend_panel(term, view, self.factions), end="")
+        print(
+            term.move_xy(0, view.drawn_rows) + term.ljust(status(self.world, view, self.hover)[: term.width]),
+            end="",
+        )
         # Zooming out shrinks the map below the window, so wipe whatever the
         # previous frame left under the status bar. Skip it when the bar is
         # already on the last row: moving past the bottom clamps back onto the
