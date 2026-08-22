@@ -12,6 +12,8 @@ buttons only.
 
 from __future__ import annotations
 
+from PlaySound import beep
+from blessed import Terminal
 import argparse
 import asyncio
 import sys
@@ -408,6 +410,7 @@ async def _activate(term: blessed.Terminal, events: asyncio.Queue[AppEvent]) -> 
             # The same rule the server will apply, so what the menu shows from
             # here on is the name the room will know them by.
             state.username = clean_name(username) or DEFAULT_USERNAME
+            beep()
             return JoinGame(address=state.address, username=state.username)
         case "settings":
             address = await prompt(term, events, "=== SERVER ADDRESS ===", state.address)
@@ -447,10 +450,11 @@ async def run_menu(term: blessed.Terminal, events: asyncio.Queue[AppEvent]) -> M
                 name = key.name or ""
                 moved = False
 
-                if name == "KEY_UP":
+                if name == "KEY_DOWN":
                     state.selected = (state.selected - 1) % len(MENU_ITEMS)
+                    print("\a", end="")
                     moved = True
-                elif name == "KEY_DOWN":
+                elif name == "KEY_UP":
                     state.selected = (state.selected + 1) % len(MENU_ITEMS)
                     moved = True
                 elif name in ("KEY_ENTER", "KEY_RETURN"):
