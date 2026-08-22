@@ -19,8 +19,9 @@ from dataclasses import dataclass
 
 import blessed
 
-import terrain
 from viewer import CELL_WIDTH, Color, territory_color
+
+from . import terrain
 
 SEED = 42
 
@@ -268,7 +269,7 @@ def main() -> None:
 
         while True:
             if dirty:
-                print(term.home + render(term, world, view, overlay, highlight_territory), end="")
+                print(term.home + render(term, world, view, overlay, {}), end="")
                 print(
                     term.move_xy(0, view.drawn_rows) + term.ljust(status(world, view, hover)[: term.width]),
                     end="",
