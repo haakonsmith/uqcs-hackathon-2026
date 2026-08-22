@@ -13,12 +13,77 @@ from client.viewport import Viewport
 from protocol.rounds import BattleReport, Phase, RoundState, Verdict
 from protocol.terrain import WorldMap
 
-# What each phase lets you do, in the order you would reach for it.
+# The short version, for the bar under the board. Both input methods get a
+# mention: the mouse is faster, the keyboard is the one that always works on
+# a terminal with no mouse reporting. The full list lives behind [?].
 KEYS: dict[Phase, str] = {
     "submitting": "[s]ubmit  [v] last result  [f]inished",
-    "allocating": "[n]ext territory  [space] place 1  [p] place all  [f]inished",
-    "moving": "[n]ext  [m] source then target  [1-9] count  [c]ancel orders  [f]inished",
+    "allocating": "click or [n][space] to place  [1-9] how many  [p] all  [f]inished",
+    "moving": "click source then target, or [n][m]  [1-9] how many  [c]ancel  [f]inished",
 }
+
+# Every binding, grouped, for the [?] panel. Phase-specific first, because
+# that is what somebody opening it mid-round is looking for.
+PHASE_HELP: dict[Phase, list[tuple[str, str]]] = {
+    "submitting": [
+        ("[s]", "write a solution in $EDITOR, submit on quit"),
+        ("[v]", "show the last result again"),
+        ("[f]", "finished - ends the phase once everyone is"),
+    ],
+    "allocating": [
+        ("click", "place troops on your own territory"),
+        ("[n] [N]", "cycle through your territories"),
+        ("[space]", "place on the picked territory"),
+        ("[1-9]", "how many a click or [space] places"),
+        ("[p]", "place every troop you have left"),
+        ("[f]", "finished with this phase"),
+    ],
+    "moving": [
+        ("click", "source, then a neighbour, to queue a march"),
+        ("[n] [N]", "cycle territories, then neighbours"),
+        ("[m]", "same as clicking: source, then target"),
+        ("[1-9]", "troops the next order sends"),
+        ("[c]", "cancel every order you have queued"),
+        ("[esc]", "forget the source you picked"),
+        ("[f]", "finished with this phase"),
+    ],
+}
+
+BOARD_HELP: list[tuple[str, str]] = [
+    ("arrows", "scroll the board"),
+    ("wheel", "scroll, shift+wheel sideways"),
+    ("+ -", "zoom in and out"),
+    ("[o]", "ownership overlay"),
+    ("[l]", "legend"),
+    ("[tab]", "scoreboard"),
+    ("[q]", "quit to the menu"),
+]
+
+RULES_HELP: list[str] = [
+    "A round is submit, then allocate, then move.",
+    "Troops earned = 3 + territories/3 + up to 5 for your",
+    "solution, +3 for solving first.",
+    "Orders are secret and all resolve together when the",
+    "moving phase ends: the biggest stack in a territory",
+    "takes it, losing as many troops as the next biggest.",
+    "A tie wipes both out and leaves it unowned.",
+]
+
+
+def help_popup(round_state: RoundState | None) -> list[str]:
+    """Everything that does something, with the current phase first."""
+    phase = round_state.phase if round_state is not None else None
+    lines = ["HELP", ""]
+
+    if phase is not None:
+        lines.append(f"{phase.upper()} - what you can do now")
+        lines += [f"  {key:<9} {what}" for key, what in PHASE_HELP[phase]]
+        lines.append("")
+
+    lines.append("ANY TIME")
+    lines += [f"  {key:<9} {what}" for key, what in BOARD_HELP]
+    lines += ["", "HOW IT WORKS", *(f"  {line}" for line in RULES_HELP)]
+    return [*lines, "", "[any key] close"]
 
 
 def clock(seconds: float) -> str:
@@ -51,7 +116,7 @@ def phase_line(round_state: RoundState | None, me: str, message: str) -> str:
 
 def key_line(round_state: RoundState | None, selected: int | None) -> str:
     """The keys that do something right now, and any pending selection."""
-    common = "arrows/wheel scroll  +/- zoom  [o]verlay  [l]egend  [tab] scores  [q]uit"
+    common = "[?] help  [o]verlay  [l]egend  [tab] scores  [q]uit"
     if round_state is None:
         return f"  {common} "
 

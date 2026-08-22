@@ -208,6 +208,12 @@ class App:
         if key == "v":
             self._show_verdict()
             return
+        if key in ("?", "/"):
+            # `/` too: `?` is shift+/ and getting the shift wrong should still
+            # open the help rather than do nothing.
+            self.popup = hud.help_popup(self.round)
+            self.dirty = True
+            return
         if await self._handle_phase_key(key):
             return
 
@@ -227,6 +233,10 @@ class App:
             moved = self.view.scroll(dx * self.view.zoom, dy * self.view.zoom, self.world)
         elif key.name and key.name.startswith("MOUSE_"):
             moved = self._handle_mouse(key)
+            # Motion and the wheel are handled above; a press is a move in the
+            # game and has to go to the server, which the sync path cannot do.
+            if key.name == "MOUSE_LEFT":
+                await self._click()
 
         if moved:
             self.refresh_hover()
@@ -245,7 +255,7 @@ class App:
             await self._submit()
             return True
         if phase == "allocating" and key in (" ", "p"):
-            await self._place(all_of_them=key == "p")
+            await self._place(None if key == "p" else self.move_count)
             return True
         if phase == "moving":
             if key.isdigit() and key != "0":
@@ -296,23 +306,26 @@ class App:
         self._say(f"submitting {len(code)} bytes ...")
         await self._request(SubmitSolution(code=code))
 
-    async def _place(self, all_of_them: bool) -> None:
+    async def _place(self, count: int | None) -> None:
+        """Put troops down. `count` of None means every one still in hand."""
         territory = self._target_territory()
         if territory is None:
-            self._say("pick a territory with [n] or the mouse first")
+            self._say("click a territory, or pick one with [n]")
             return
+
         mine = self.round.player(self.me) if self.round else None
-        count = mine.troops if all_of_them and mine is not None else 1
-        if count < 1:
+        held = mine.troops if mine is not None else 0
+        wanted = held if count is None else min(count, held)
+        if wanted < 1:
             self._say("no troops left to place")
             return
-        await self._request(PlaceTroops(territory=territory, count=count))
+        await self._request(PlaceTroops(territory=territory, count=wanted))
 
     async def _order(self) -> None:
         """Pick a source, then a neighbour, and queue a march between them."""
         territory = self._target_territory()
         if territory is None:
-            self._say("pick a territory with [n] or the mouse first")
+            self._say("click a territory, or pick one with [n]")
             return
 
         if self.move_from is None:
@@ -321,7 +334,7 @@ class App:
                 return
             self.move_from = territory
             self.selected = None
-            self._say(f"from {territory} - [n] to pick a neighbour, [1-9] for how many, then [m]")
+            self._say(f"from {territory} - now click a neighbour, or [n] then [m]. [1-9] sets how many")
             return
 
         source = self.world.territories[self.move_from]
@@ -332,6 +345,39 @@ class App:
             return
         await self._request(MoveTroops(source=source.id, target=territory, count=count))
         self.move_from = None
+
+    async def _click(self) -> None:
+        """Left click: place here, or march from here to there.
+
+        The same two-step as the keyboard, because it is the same state: the
+        first click on your own ground picks a source, the second names the
+        destination. Clicking is only faster, not different, so a player can
+        switch between mouse and keyboard mid-order.
+        """
+        if self.round is None or self.conn is None:
+            return
+
+        under = self._hovered_territory()
+        if under is None:
+            self._say("nothing there")
+            return
+
+        # `_place` and `_order` read the keyboard pick first, so pointing them
+        # at what was clicked is a matter of setting it.
+        self.selected = under
+        if self.round.phase == "allocating":
+            await self._place(self.move_count)
+        elif self.round.phase == "moving":
+            await self._order()
+        else:
+            self.dirty = True
+
+    def _hovered_territory(self) -> int | None:
+        """The territory under the mouse, ignoring any keyboard pick."""
+        if self.cursor is None:
+            return None
+        cell = self.view.cell_at(self.world, *self.cursor)
+        return cell.territory if cell is not None else None
 
     def _target_territory(self) -> int | None:
         """What a phase key acts on: the keyboard pick, else what is hovered."""
