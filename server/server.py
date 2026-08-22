@@ -26,11 +26,20 @@ from protocol import (
     parse_frame,
 )
 from server.player import Player
+from protocol.terrain import WorldMap
 
 logger = logging.getLogger("Server")
 
-
+@dataclass
 class Server:
+
+    connections: set[websockets.ServerConnection]
+    game: WorldMap | None
+    players: dict[UUID, Player]
+    sessions: dict[websockets.ServerConnection, UUID]
+    map: WorldMap | None
+    player_count: int
+
     def __init__(self) -> None:
         self.connections: set[websockets.ServerConnection] = set()
         self.game: None = None  # put your game state here!
@@ -39,7 +48,7 @@ class Server:
         self.sessions: dict[websockets.ServerConnection, UUID] = {}
         
         self.map: World | None = None
-        self.targetMultiplayer = 4
+        self.player_count = 4
 
     def createWorld(self) -> World:
         """Function that creates and assigns the world."""
@@ -57,7 +66,7 @@ class Server:
                 
                 await self.broadcast(PlayerJoined(player_id=str(player_id)), exclude=ws)
                 
-                if len(self.players) >= self.targetMultiplayer and self.map is None:
+                if len(self.players) >= self.player_count and self.map is None:
                     self.createWorld()
                 return Joined(player_id=str(player_id), world=self.map)
 
@@ -78,7 +87,7 @@ class Server:
     async def register_connection(self, websocket: websockets.ServerConnection) -> None:
         logger.info(f"Connection received from {websocket.id}")
         
-        if len(self.connections) >= self.targetMultiplayer:
+        if len(self.connections) >= self.player_count:
             await websocket.close(code=1008, reason="lobby full")
             return
 
