@@ -50,6 +50,7 @@ BOARD_HELP: list[tuple[str, str]] = [
     ("wheel", "scroll, shift+wheel for sideways"),
     ("+ -", "zoom in and out"),
     ("[o]", "faint or bold borders"),
+    ("[d]", "relief shading on or off"),
     ("[l]", "show or hide the legend"),
     ("[tab]", "scoreboard"),
     ("[?]", "this panel"),

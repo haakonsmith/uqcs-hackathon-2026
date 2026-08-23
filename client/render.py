@@ -73,6 +73,7 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("arrows", "scroll the map"),
     ("+/-", "zoom in and out"),
     ("o", "border strength"),
+    ("d", "relief shading"),
     ("l", "this legend"),
     ("n/N", "pick a territory"),
     ("space", "place troops here"),
@@ -130,6 +131,108 @@ def cell_color(cell: terrain.Cell, highlights: dict[int, Highlight], factions: F
         # highlight reads as that side's ground lighting up.
         return blend(side_color(factions, cell.territory), cell.terrain.color, HOVER_ALPHA)
     return cell.terrain.color
+
+
+# Relief shading. The board is a flat grid of colours, so depth has to come
+# from somewhere other than geometry: every tile is lit from the top-left and
+# casts a shadow down and to the right, which is the same light the title art
+# on the menu is drawn under.
+#
+# Land over water is the strong edge - a coastline should read as ground
+# standing above the sea - and a territory boundary is the soft one, enough to
+# make holdings look like tiles laid on the map rather than paint on it.
+COAST_SHADOW_ALPHA = 0.55
+EDGE_SHADOW_ALPHA = 0.26
+# The lit face, on the side the light comes from. Weaker than the shadow: real
+# relief is mostly shadow, and a bright rim on every tile reads as a grid.
+RIM_LIGHT_ALPHA = 0.16
+
+# How far a coast throws its shadow across the water, in map cells. One cell is
+# an outline; a shadow has to fall clear of the thing casting it to read as one.
+# Water only - carrying it across land would darken the inside of every holding
+# and the board is meant to be read through, not admired.
+SHADOW_REACH = 3
+
+SHADOW: Color = (0, 0, 0)
+RIM: Color = (255, 255, 255)
+
+
+# The tile a cell belongs to, for deciding where one piece of ground stops and
+# the next begins. Territory ids are non-negative, so the two kinds of ground
+# that are nobody's take negative ones and can still be compared by equality.
+SEA = -2
+UNCLAIMED = -1
+
+
+def _tile_at(world: terrain.WorldMap, x: int, y: int) -> int:
+    """Which tile a cell belongs to. Off the board reads as open sea."""
+    if not (0 <= x < world.width and 0 <= y < world.height):
+        return SEA
+    cell = world.grid[y][x]
+    if cell.territory is not None:
+        return cell.territory
+    return UNCLAIMED if cell.terrain.passable else SEA
+
+
+def relief(world: terrain.WorldMap, cell: terrain.Cell, step: int) -> float:
+    """How this cell is shaded: below zero in shadow, above it lit.
+
+    Only the neighbours up and to the left are read, which is what makes this a
+    drop shadow rather than an outline: a boundary darkens on the side facing
+    away from the light and nothing is drawn on the other, so ground reads as
+    standing over what is behind it instead of being ringed in black.
+
+    Sampled `step` cells away for the same reason `frontier_side` is: at zoom
+    the cells in between are never drawn.
+    """
+    here = _tile_at(world, cell.x, cell.y)
+    reach = SHADOW_REACH if here == SEA else 1
+    for distance in range(1, reach + 1):
+        away = distance * step
+        for dx, dy in ((0, -away), (-away, 0), (-away, -away)):
+            there = _tile_at(world, cell.x + dx, cell.y + dy)
+            if there == here:
+                continue
+            if here == SEA:
+                # Land standing over open water, the edge worth seeing. Fades
+                # with distance, so the shadow has an edge of its own.
+                return -COAST_SHADOW_ALPHA / distance
+            if there == SEA:
+                # The shore the light reaches first.
+                return RIM_LIGHT_ALPHA
+            return -EDGE_SHADOW_ALPHA
+    return 0.0
+
+
+# The relief of the whole board, worked out once. Nothing it reads can change:
+# a cell's territory and terrain are fixed when the world is generated, and
+# ownership never enters into it. Recomputing per frame cost about 4 ms, most
+# of it open water looking three cells in every direction for a coast that is
+# not there.
+#
+# One entry, matched by identity: only the board being played on is ever asked
+# for, and holding a reference to it keeps the key from outliving the world.
+_RELIEF: tuple[terrain.WorldMap, int, list[list[float]]] | None = None
+
+
+def relief_grid(world: terrain.WorldMap, step: int) -> list[list[float]]:
+    """Every cell's shading, indexed `[y][x]`."""
+    global _RELIEF
+    if _RELIEF is not None and _RELIEF[0] is world and _RELIEF[1] == step:
+        return _RELIEF[2]
+
+    grid = [[relief(world, cell, step) for cell in row] for row in world.grid]
+    _RELIEF = (world, step, grid)
+    return grid
+
+
+def shaded(color: Color, amount: float) -> Color:
+    """`color` pushed towards black or white by `relief`'s reading."""
+    if amount < 0:
+        return blend(SHADOW, color, -amount)
+    if amount > 0:
+        return blend(RIM, color, amount)
+    return color
 
 
 def side_at(world: terrain.WorldMap, factions: Factions, x: int, y: int) -> int | None:
@@ -204,19 +307,27 @@ def board_colors(
     bold_borders: bool,
     highlights: dict[int, Highlight],
     factions: Factions,
+    shadows: bool = True,
 ) -> list[list[Color]]:
     """The colour of every screen cell, without any escape sequences.
 
     Separated from the drawing so a frame can be compared with the one before
     it: two grids of tuples diff cheaply, two strings of escapes do not.
+
+    Shading goes on before the frontier, not after. `frontier_color` searches
+    for a colour that clears a contrast ratio against the ground it sits on, so
+    darkening that ground afterwards would spend the margin it just found.
     """
     border_alpha = BORDER_ALPHA_BOLD if bold_borders else BORDER_ALPHA
     border_contrast = BORDER_CONTRAST_BOLD if bold_borders else BORDER_CONTRAST
+    relief_of = relief_grid(world, view.zoom) if shadows else None
     grid: list[list[Color]] = []
     for row in world.grid[view.y : view.y + view.span_y : view.zoom]:
         colors: list[Color] = []
         for cell in row[view.x : view.x + view.span_x : view.zoom]:
             color = cell_color(cell, highlights, factions)
+            if relief_of is not None:
+                color = shaded(color, relief_of[cell.y][cell.x])
             side = frontier_side(world, factions, cell, view.zoom)
             if side is not None:
                 color = frontier_color(factions.colors[side], color, border_alpha, border_contrast)
@@ -232,9 +343,10 @@ def draw_board(
     bold_borders: bool,
     highlights: dict[int, Highlight],
     factions: Factions,
+    shadows: bool = True,
 ) -> None:
     """Compose the visible slice of terrain into `screen`."""
-    for y, colors in enumerate(board_colors(world, view, bold_borders, highlights, factions)):
+    for y, colors in enumerate(board_colors(world, view, bold_borders, highlights, factions, shadows)):
         for x, color in enumerate(colors):
             # Two columns per map cell, so terrain is not sheared vertically.
             for column in range(CELL_WIDTH):

@@ -98,6 +98,7 @@ class App:
     factions: Factions
     view: Viewport = field(default_factory=Viewport)
     bold_borders: bool = False
+    shadows: bool = True
     legend: bool = True
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
@@ -298,6 +299,10 @@ class App:
 
         if key == "o":
             self.bold_borders = not self.bold_borders
+            self.dirty = True
+        elif key == "d":
+            self.shadows = not self.shadows
+            self._say("relief on" if self.shadows else "relief off")
             self.dirty = True
         elif key == "l":
             self.legend = not self.legend
@@ -641,7 +646,7 @@ class App:
         term, view = self.term, self.view
         frame = Screen(term.width, term.height)
 
-        draw_board(frame, self.world, view, self.bold_borders, self.highlights, self.factions)
+        draw_board(frame, self.world, view, self.bold_borders, self.highlights, self.factions, self.shadows)
         # Over the water, under everything else: a lane is part of the map.
         draw_sea_routes(frame, self.world, view, self.factions)
         # Garrisons before the legend: the legend is a solid box and should
