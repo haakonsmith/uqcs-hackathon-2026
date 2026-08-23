@@ -14,6 +14,7 @@ import blessed
 
 from client.input import AppEvent, KeyPress, Received, Resized
 from client.menu import notice
+from client.sound import beep
 from protocol import Connection, GameStarted, Lobby, LobbyChanged, SetReady, World
 
 # Room enough for a name and its status without the panel jumping about as
@@ -62,6 +63,7 @@ async def run_lobby(
             case Resized():
                 pass
             case Received(event=GameStarted(world=world)):
+                beep()
                 return world, lobby
             case Received(event=LobbyChanged(lobby=updated)):
                 lobby = updated

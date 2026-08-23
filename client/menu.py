@@ -25,7 +25,6 @@ import blessed
 from client.input import AppEvent, KeyPress, Received, Resized
 from client.palette import PANEL_BG, PANEL_FG, SELECTED_BG, SELECTED_FG, Color
 from client.render import CELL_WIDTH
-from PlaySound import beep
 from protocol.lobby import MAX_NAME_LENGTH, clean_name
 from protocol.terrain import Terrain
 
@@ -409,7 +408,6 @@ async def _activate(term: blessed.Terminal, events: asyncio.Queue[AppEvent]) -> 
             # The same rule the server will apply, so what the menu shows from
             # here on is the name the room will know them by.
             state.username = clean_name(username) or DEFAULT_USERNAME
-            beep()
             return JoinGame(address=state.address, username=state.username)
         case "settings":
             address = await prompt(term, events, "=== SERVER ADDRESS ===", state.address)

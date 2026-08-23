@@ -9,7 +9,6 @@ import websockets
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 
-from PlaySound import beep
 from protocol import (
     Acknowledged,
     BoardChanged,
@@ -274,7 +273,6 @@ class Server:
             while self.round is not None:
                 await asyncio.sleep(CLOCK_TICK)
                 if self.round is not None and self.round.should_advance():
-                    beep()
                     await self._advance()
         except asyncio.CancelledError:
             raise

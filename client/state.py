@@ -23,6 +23,7 @@ from client.input import SCROLL_KEYS, KeyPump, wheel_delta
 from client.palette import Factions
 from client.render import Highlight, draw_board, draw_garrisons, draw_legend, draw_sea_routes
 from client.screen import Screen
+from client.sound import beep
 from client.viewport import Viewport
 from protocol import (
     Acknowledged,
@@ -686,6 +687,13 @@ class App:
                     # a stale verdict cannot sit over the new instructions.
                     self.message = ""
                     self._forget_plan()
+                    # The phase turns on the server's clock, and a player who
+                    # has dropped into their editor to write a solution cannot
+                    # see it happen. This is the only thing that reaches them
+                    # there, so it belongs on the change itself rather than on
+                    # any one screen.
+                    if self.round is not None:
+                        beep()
                     if round_state.phase == "commanding":
                         # Marks survive the submitting phase so a player
                         # looking up from their editor can still see what
