@@ -85,11 +85,8 @@ def _wrap(text: str, width: int = 68) -> list[str]:
     return lines
 
 
-# Status bars under the board: the round, then the hover text and keys.
-# Phase, hover, keys - a row each. Two of them used to share, and on any
-# terminal narrower than about 120 columns that meant one of the two was cut
-# off: the key line alone runs to most of an 80-column row. A board row is a
-# cheap price for both being readable at every width.
+# Phase, hover and keys, a row each. Sharing a row cuts one of them off below
+# about 120 columns: the key line alone fills most of an 80-column row.
 HUD_ROWS = 3
 
 
@@ -104,12 +101,9 @@ class App:
     cursor: tuple[int, int] | None = None
     hover: str = "move the mouse over the map"
     highlights: dict[int, Highlight] = field(default_factory=dict)
-    # Something changed and the frame should be composed again. Purely a CPU
-    # guard now: composing costs about 3 ms and the diff decides what actually
+    # Purely a CPU guard: composing costs about 3 ms and the diff decides what
     # reaches the terminal, so setting this when nothing changed wastes work
-    # but cannot put anything wrong on screen. That is the opposite of the
-    # per-component invalidation it replaced, where being wrong meant a stale
-    # board under a closed popup.
+    # but cannot put anything wrong on screen.
     dirty: bool = True
     # The frame currently on the terminal, to diff the next one against.
     _shown: Screen | None = None
@@ -135,8 +129,7 @@ class App:
     # scrolls past in a status bar is a verdict nobody saw.
     popup: list[str] | None = None
     # When a held popup may be dismissed, on the monotonic clock. Panels that
-    # arrive unasked - the reveal, the winner - are held for a few seconds so
-    # they cannot be closed by a key already on its way down.
+    # arrive unasked cannot be closed by a key already on its way down.
     popup_hold_until: float = 0.0
     # The last panel shown, so `[v]` can put it back after a dismissal.
     last_popup: list[str] | None = None
@@ -151,13 +144,8 @@ class App:
     # the phase carries it out.
     placements: dict[int, int] = field(default_factory=dict)
     # What the last resolution did, by territory, lit on the board until the
-    # next commanding phase opens. A popup can name where a battle was, but
-    # only the board can show it, and the popup is gone the moment a key is
-    # pressed - which is well before anybody has found the place on the map.
-    #
-    # The note comes with the mark rather than the mark being a bare set: a lit
-    # territory with no way to ask what happened to it is a question mark, and
-    # the player is left counting garrisons to work out which way it went.
+    # next commanding phase opens. The note travels with the mark so a lit
+    # territory can say what happened to it.
     battle_notes: dict[int, str] = field(default_factory=dict)
 
     def tick(self) -> None:
@@ -259,16 +247,14 @@ class App:
         moved = False
 
         if self.popup is not None:
-            # No mouse input closes a panel, clicks included. Motion arrives
-            # here as a keystroke and a hand resting on the desk produces a
-            # stream of it, and a click aimed at the board underneath is not a
-            # decision to dismiss what is covering it. A panel goes away when
-            # a player presses a key, and stays until then.
+            # No mouse input closes a panel, clicks included: motion arrives
+            # as a keystroke, and a hand resting on the desk produces a stream
+            # of it.
             if (key.name or "").startswith("MOUSE_"):
                 return
             if time.monotonic() < self.popup_hold_until:
-                # Still held. The keystroke is swallowed rather than queued:
-                # it was aimed at whatever was on screen before this appeared.
+                # Swallowed rather than queued: the key was aimed at whatever
+                # was on screen before this appeared.
                 return
             # The panel was drawn over the terrain, so the terrain under it
             # has to be drawn again to erase it.
@@ -286,9 +272,8 @@ class App:
             self.dirty = True
             return
         if key.name == "KEY_ESCAPE":
-            # The one way back to no pick at all. Without it a territory chosen
-            # with [n] stays white for the rest of the game, because cycling
-            # only ever moves the pick to somewhere else.
+            # The one way back to no pick at all: cycling with [n] only ever
+            # moves the pick somewhere else.
             if self.selected is not None:
                 self.selected = None
                 self._say("nothing picked")
@@ -452,8 +437,7 @@ class App:
 
         # Deliberately not `self.selected = under`. A click says where to put
         # troops once; the keyboard pick is a standing choice, drawn white
-        # until something clears it. Making a click set it left every clicked
-        # territory highlighted for the rest of the phase.
+        # until something clears it.
         if self.round.phase != "commanding":
             self.selected = under
             self.dirty = True
@@ -552,11 +536,9 @@ class App:
         try:
             response = await self.conn.send(request)
         except TimeoutError:
-            # Not fatal. The socket is fine and the server is most likely still
-            # working - a judge with every slot busy answers late rather than
-            # never. Quitting the game over it, which is what treating this
-            # like a dropped connection did, loses a player their board over a
-            # busy moment they had no part in causing.
+            # Not fatal: the socket is fine and a judge with every slot busy
+            # answers late rather than never. Quitting here would cost a player
+            # their board over a busy moment they had no part in causing.
             self._say("no answer yet - the server is busy. Nothing was lost; try again")
             return None
         except (ConnectionError, ProtocolError) as error:
@@ -624,10 +606,10 @@ class App:
         """
         if not self.popup:
             return []
-        left = self.popup_hold_until - time.monotonic()
-        if left <= 0:
+        notice = hud.hold_notice(self.popup_hold_until - time.monotonic())
+        if notice is None:
             return self.popup
-        return [*self.popup[:-1], hud.hold_notice(left)]
+        return [*self.popup[:-1], notice]
 
     def _handle_mouse(self, key: Keystroke) -> bool:
         # Keystroke reports mouse position as mouse_xy, not .x / .y, and gives
@@ -639,8 +621,6 @@ class App:
         delta = wheel_delta(key.name or "")
         if delta is not None:
             zoom = self.view.zoom
-            # Scrolling moves the terrain, so the caller's `moved` handling
-            # the view, which the caller turns into a redraw.
             return self.view.scroll(delta[0] * zoom, delta[1] * zoom, self.world)
 
         if (mx, my) != (-1, -1):
@@ -670,12 +650,10 @@ class App:
         if self.legend:
             draw_legend(frame, view, self.factions)
 
-        # Two bars: what the round is doing, and what the mouse is pointing at
-        # plus the keys that work right now.
         bars = [
             hud.phase_line(self.round, self.me, self.message),
             f" {self.hover}",
-            hud.key_line(self.round),
+            hud.key_line(self.round, frame.width),
         ]
         for offset, text in enumerate(bars):
             frame.row(view.drawn_rows + offset, text)
@@ -709,12 +687,9 @@ class App:
                     self.message = ""
                     self._forget_plan()
                     if round_state.phase == "commanding":
-                        # Last round's fights stop being news the moment there
-                        # is a decision to make, and a board still lit up with
-                        # them is a board that is hard to plan on. They survive
-                        # the submitting phase, which is the whole point: a
-                        # player looks up from their editor and can still see
-                        # what happened to them.
+                        # Marks survive the submitting phase so a player
+                        # looking up from their editor can still see what
+                        # happened, and clear before there is planning to do.
                         self.battle_notes = {}
                 self.round = round_state
                 self.refresh_hover()
@@ -740,8 +715,7 @@ class App:
                 self.battle_notes = {b.territory: hud.mark_note(b, self.me) for b in battles}
                 for order in dropped:
                     # A territory can be both fought over and short of troops
-                    # somebody meant to land on it. The battle is the bigger
-                    # news, so it keeps the line.
+                    # meant for it. The battle is the bigger news.
                     self.battle_notes.setdefault(order.territory, hud.dropped_note(order, self.me))
                 self.refresh_hover()
                 self._show_popup(

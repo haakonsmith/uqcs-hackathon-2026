@@ -134,15 +134,11 @@ class WorldMap:
         return self.territories[territory_id].owner == player or self.borders(player, territory_id)
 
 
-# --------------------------------------------------------------------------
-# The same board, flattened for the wire
-#
 # `WorldMap` above is the shape the renderer and the game logic want: an object
 # per cell, sets of neighbours, `Terrain` members. None of that survives JSON,
-# so `World` below is the same board as parallel grids and plain lists, and the
-# two are converted with `World.from_map()` and `World.to_map()`. The pairing
-# is deliberate - `TerritoryState` is not a stray duplicate of `Territory`.
-# --------------------------------------------------------------------------
+# so `World` below is the same board as parallel grids and plain lists,
+# converted with `World.from_map()` and `World.to_map()`. The pairing is
+# deliberate - `TerritoryState` is not a stray duplicate of `Territory`.
 
 # Heights are noise output, drawn as one of seven terrain bands and shown to
 # two decimals. Full float64 text triples the size of a board on the wire to
@@ -185,7 +181,7 @@ class World:
     width: int
     height: int
     seed: int | None
-    # Row-major heights in [0.0, 1.0] — heights[y][x]
+    # Row-major heights in [0.0, 1.0] - heights[y][x]
     heights: list[list[float]]
     # Parallel to heights: Terrain member name per cell
     terrain: list[list[str]]

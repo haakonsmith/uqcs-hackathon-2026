@@ -26,19 +26,16 @@ from server.problems import BANK, TestCase, tests_for
 
 logger = logging.getLogger("Judge")
 
-# A submission longer than this is not a solution to a warm-up problem, and
-# the limit costs nothing to enforce before any parsing happens.
+# A submission longer than this is not a solution to a warm-up problem.
 MAX_SOURCE_BYTES = 64 * 1024
 
 # Sandboxes allowed to run at once, across every player. Sized so a full room
-# submitting into the biggest problem in the bank resolves in one wave: queued
-# waves multiply the wall clock a client is waiting on, which is what makes a
-# slow phase look like a dead server. Processes, not threads - the ceiling is
-# the host's, so lower it on a small machine and raise `SubmitSolution`'s
-# timeout to match.
+# submitting into the biggest problem resolves in one wave: queued waves
+# multiply the wall clock a client waits on. Processes, not threads, so lower it
+# on a small machine and raise `SubmitSolution`'s timeout to match.
 MAX_EXPECTED_PLAYERS = 6
-# Read off the bank rather than written down, so adding a problem with more
-# cases than any before it widens the pool instead of quietly costing a wave.
+# Read off the bank, so a problem with more cases than any before it widens the
+# pool rather than quietly costing a wave.
 DEFAULT_CONCURRENCY = MAX_EXPECTED_PLAYERS * max((len(entry.tests) for entry in BANK), default=1)
 
 
@@ -142,12 +139,9 @@ class SubprocessJudge:
         if not cases:
             return Verdict(passed=0, total=0, error="no tests for this problem")
 
-        # Concurrently, and this is a correctness matter rather than a speed
-        # one: run in sequence, a solution that times out on every case takes
-        # `wall_seconds` x `len(cases)`, which overruns the protocol's request
-        # timeout and the player is told the server died. Keep `concurrency`
-        # at or above the largest problem's case count and the worst case
-        # stays near a single `wall_seconds`.
+        # Correctness, not speed: run in sequence, a solution that times out on
+        # every case takes `wall_seconds` x `len(cases)`, overruns the request
+        # timeout, and the player is told the server died.
         results = await asyncio.gather(*(self._run(code, index, case) for index, case in enumerate(cases, start=1)))
 
         passed = sum(1 for case in results if case.ok)
@@ -174,7 +168,7 @@ class SubprocessJudge:
         if result.timed_out:
             return outcome("timeout", f"killed after {self.limits.wall_seconds:.0f}s")
         if result.exit_code != 0:
-            # Their own traceback, which is exactly what they need to see.
+            # Their own traceback, which is what they need to see.
             return outcome("crashed", _last_line(result.stderr))
         if result.truncated:
             return outcome("flooded", f"over {self.limits.output_bytes // 1024} KB of output")
@@ -211,10 +205,9 @@ def compare(case: TestCase, output: str) -> bool:
 def _normalise(text: str) -> list[str]:
     """Output as comparable lines: no surrounding blank, no trailing space.
 
-    The outer `strip` is what the whole-blob comparison used to do on its own,
-    kept so nothing that passed before starts failing. Indentation part-way
-    through an answer still counts - a solution printing a shape is printing
-    the spaces on purpose.
+    The outer `strip` forgives leading and trailing blank. Indentation part-way
+    through an answer still counts: a solution printing a shape is printing the
+    spaces on purpose.
     """
     lines = [line.rstrip() for line in text.strip().splitlines()]
     while lines and not lines[-1]:

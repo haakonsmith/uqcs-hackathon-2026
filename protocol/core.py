@@ -15,19 +15,13 @@ import typing
 from dataclasses import dataclass
 from typing import ClassVar
 
-# What this build of the protocol calls itself. Bump it whenever a change to
-# the messages in `actions` or `rounds` would stop an older peer reading them:
-# a field removed or renamed, a required field added, a type narrowed. Adding
-# an optional field with a default does not need one - both ends already cope.
-#
-# It exists because the alternative is what a mismatch used to look like: a
-# pydantic traceback in the middle of somebody's game, at whichever message
-# happened to change, naming a field nobody has heard of. A number checked once
-# at the door turns that into a sentence saying which end is out of date.
+# Bump whenever a change to the messages in `actions` or `rounds` would stop an
+# older peer reading them: a field removed or renamed, a required field added, a
+# type narrowed. An optional field with a default does not need one.
 PROTOCOL_VERSION = 1
 
-# What an end that predates the handshake looks like. Neither side sends it, so
-# it is what the default fills in when the field is simply absent.
+# What a peer that predates the handshake reports, being the default for an
+# absent field.
 UNVERSIONED = 0
 
 
@@ -39,11 +33,9 @@ class ProtocolError(Exception):
 class Request[R]:
     """R is the response type this request expects. Never stored.
 
-    `timeout_seconds` is how long the client waits for the answer. It lives on
-    the request because how long an answer can honestly take is a property of
-    what was asked: a placement is a dictionary write and a submission runs a
-    stranger's code in a sandbox, and one number for both has to be either too
-    patient for the first or too impatient for the second.
+    `timeout_seconds` is how long the client waits for the answer. Per request
+    because a placement is a dictionary write and a submission runs a stranger's
+    code in a sandbox.
     """
 
     timeout_seconds: ClassVar[float] = 10.0
@@ -65,10 +57,9 @@ def response_types(cls: type) -> tuple[type, ...]:
     if cached is not None:
         return cached
 
-    # The introspection APIs are typed as tuple[Any, ...] because they can hand
-    # back anything writable in a type expression. Widening to object at the
-    # boundary keeps that Any from leaking, and the isinstance filter below is
-    # what actually earns the tuple[type, ...] return.
+    # The introspection APIs are typed tuple[Any, ...] - anything writable in a
+    # type expression. Widening to object keeps that Any from leaking; the
+    # isinstance filter below is what earns the tuple[type, ...] return.
     bases: tuple[object, ...] = types.get_original_bases(cls)
     base = next((b for b in bases if typing.get_origin(b) is Request), None)
     if base is None:

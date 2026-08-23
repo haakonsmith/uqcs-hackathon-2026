@@ -4,12 +4,12 @@ import time
 from dataclasses import dataclass
 from typing import assert_never
 from uuid import UUID, uuid4
-from PlaySound import beep
 
 import websockets
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError
 
+from PlaySound import beep
 from protocol import (
     Acknowledged,
     BoardChanged,
@@ -137,11 +137,10 @@ class Server:
                     logger.info(f"turning away {name!r} from {_short(ws.id)}: a game is already running")
                     return JoinRejected(reason="a game is already in progress")
 
-                # Not a formality: every name here is drawn into somebody
-                # else's fixed-width panel, so one player choosing a long or a
-                # newline-bearing one decides how the room's screens look.
-                # The client stops this being reachable; a client that did not
-                # bother is exactly who this is for.
+                # Every name is drawn into somebody else's fixed-width panel,
+                # so a long or newline-bearing one decides how the room's
+                # screens look. The client stops this being reachable; a client
+                # that did not bother is who this is for.
                 clean = clean_name(name)
                 if not clean:
                     logger.info(f"turning away {name!r} from {_short(ws.id)}: nothing usable in the name")

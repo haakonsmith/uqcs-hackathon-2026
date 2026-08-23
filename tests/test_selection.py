@@ -1,9 +1,7 @@
 """The white highlight: what picks a territory, and what lets go of it.
 
-`selected` is a standing choice - it is drawn white until something clears it
-and it is what the phase keys act on. A click is not one of those things: it
-says where troops go once. Conflating the two left every territory a player had
-ever clicked highlighted for the rest of the phase.
+`selected` is a standing choice - drawn white until something clears it, and
+what the phase keys act on. A click is not one: it says where troops go once.
 """
 
 from __future__ import annotations
@@ -202,13 +200,22 @@ def test_a_held_panel_keeps_repainting_so_the_countdown_moves(app: App) -> None:
     assert app.dirty, "a frozen countdown reads as the game having hung"
 
 
-def test_the_hold_grows_with_how_much_there_is_to_read() -> None:
+def test_the_hold_is_only_long_enough_to_swallow_a_key_in_flight() -> None:
     from client import hud
     from protocol.rounds import BattleReport
 
     one = hud.reveal_hold([BattleReport(territory=0)])
     many = hud.reveal_hold([BattleReport(territory=i) for i in range(5)])
-    assert 0 < one < many <= hud.REVEAL_HOLD_LIMIT
+    assert one == many == hud.REVEAL_HOLD_SECONDS, "a longer report is not a reason to lock the board"
+    assert one < 1.0, "the next real keypress closes it"
+
+
+def test_a_hold_too_short_to_read_says_nothing_about_itself() -> None:
+    """Otherwise the panel flashes a countdown nobody could act on."""
+    from client import hud
+
+    assert hud.hold_notice(hud.REVEAL_HOLD_SECONDS) is None
+    assert hud.hold_notice(5.0) == "[any key] in 5s"
 
 
 def test_a_phase_with_nothing_to_report_is_not_held_at_all() -> None:

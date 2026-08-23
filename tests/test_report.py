@@ -1,9 +1,8 @@
 """The end-of-phase report: whether a player can read their own game out of it.
 
-The same report goes to everybody, and the old one was written for none of
-them: third-person names in territory-id order, with the id as the only handle
-on where anything happened. These cases pin the two things that fixes - saying
-which side is yours, and saying where the ground is.
+The same report goes to everybody, so it has to be written from the reader's
+side. These cases pin the two things that takes: saying which side is yours,
+and saying where the ground is.
 """
 
 from __future__ import annotations

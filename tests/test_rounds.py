@@ -71,8 +71,8 @@ def test_a_player_who_leaves_releases_their_ground(alice: UUID, bob: UUID) -> No
 
 
 def test_the_last_player_left_wins_rather_than_waiting_forever(alice: UUID, bob: UUID) -> None:
-    """The deadlock: a leaver's territories used to stay theirs, so the board
-    kept two owners and `outcome` never fired, whoever held what."""
+    """A leaver's territories must not stay theirs: two owners on the board
+    means `outcome` never fires, whoever holds what."""
     round_ = game(alice, bob)
     _ = round_.drop(bob)
     assert round_.outcome() == Outcome(winner=alice)

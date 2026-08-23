@@ -112,9 +112,8 @@ class Round:
 
     number: int = 0
     phase: Phase = "submitting"
-    # How many players the game opened with. A solo game has no winner to
-    # declare, and counting `progress` instead would make one the moment
-    # everybody but the last player disconnected.
+    # A solo game has no winner to declare, and counting `progress` instead
+    # would declare one the moment everybody but the last player disconnected.
     started_with: int = 0
     problem: Problem | None = None
     progress: dict[UUID, Progress] = field(default_factory=dict)
@@ -136,10 +135,6 @@ class Round:
         self.number = 0
         self._open_round()
 
-    # ------------------------------------------------------------------
-    # Clock
-    # ------------------------------------------------------------------
-
     def seconds_left(self, now: float | None = None) -> float:
         return max(0.0, self.deadline - (now if now is not None else time.monotonic()))
 
@@ -160,10 +155,6 @@ class Round:
 
     def is_out(self, player_id: UUID) -> bool:
         return combat.eliminated(self.board, player_id)
-
-    # ------------------------------------------------------------------
-    # Moves
-    # ------------------------------------------------------------------
 
     async def submit(self, player_id: UUID, code: str) -> Verdict:
         """Judge one solution. Only the player's best attempt is kept."""
@@ -217,9 +208,9 @@ class Round:
         """Tear up the phase: placed troops go back into hand."""
         progress = self._require(player_id)
         progress.troops += self.plan.clear(player_id)
-        # Same reasoning as `place`: a player who has just thrown their plan
-        # away has something left to decide. Leaving them finished let a room
-        # advance the phase out from under somebody who had nothing committed.
+        # As in `place`: a player who has thrown their plan away has something
+        # left to decide, and a room should not advance the phase out from
+        # under them.
         progress.done = False
 
     def placements_for(self, player_id: UUID) -> list[Placement]:
@@ -253,10 +244,6 @@ class Round:
         for territory_id in released:
             self.board.territories[territory_id].owner = None
         return released
-
-    # ------------------------------------------------------------------
-    # Phases
-    # ------------------------------------------------------------------
 
     def advance(self) -> combat.Resolution | None:
         """Close the current phase and open the next.
@@ -344,10 +331,6 @@ class Round:
                 troops += FIRST_BLOOD_TROOPS
             progress.troops = troops
             logger.info(f"{progress.name} earned {troops} troops ({held} territories)")
-
-    # ------------------------------------------------------------------
-    # Views
-    # ------------------------------------------------------------------
 
     def state(self) -> RoundState:
         return RoundState(

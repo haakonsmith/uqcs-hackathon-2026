@@ -1,8 +1,5 @@
 """The three lines under the board: the phase, the pointer, and the keys.
 
-A row each. Two of them used to share one, and on any terminal narrower than
-about 120 columns that meant whichever was written second got cut off.
-
 Split out of `render` because it is the only part of the screen that reads the
 round rather than the terrain, and it changes every second while the rest of a
 frame changes hardly at all.
@@ -16,15 +13,13 @@ from client.palette import PANEL_BG, PANEL_FG
 from client.screen import Screen
 from protocol import terrain
 from protocol.lobby import MAX_NAME_LENGTH
-from protocol.rounds import BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
+from protocol.rounds import GRACE_SECONDS, BattleReport, DroppedOrder, Phase, PlayerRound, RoundState, Verdict
 
-# The short version, for the bar under the board. Both input methods get a
-# mention: the mouse is faster, the keyboard is the one that always works on a
-# terminal with no mouse reporting.
+# Both input methods get a mention: the mouse is faster, the keyboard is the one
+# that always works on a terminal with no mouse reporting.
 #
-# Ordered most useful first. A row too narrow to hold them all keeps the front
-# and gives up the tail, so this is both the reading order and the order they
-# go in. Nothing is lost by dropping one: [?] always has the full list.
+# Ordered most useful first - a row too narrow to hold them all keeps the front
+# and gives up the tail. [?] always has the full list.
 KEYS: dict[Phase, tuple[str, ...]] = {
     "submitting": ("[s]ubmit", "[f]inished", "[v] last panel"),
     "commanding": ("click to place", "[1-9] how many", "[f]inished", "[v] last panel", "[c]lear", "[p] all"),
@@ -61,8 +56,8 @@ BOARD_HELP: list[tuple[str, str]] = [
     ("[q]", "quit to the menu"),
 ]
 
-# Short lines that each say one thing. The old version was a paragraph wrapped
-# to the panel, which is the hardest shape to find an answer in.
+# Short lines that each say one thing: a paragraph wrapped to the panel is the
+# hardest shape to find an answer in.
 RULES_HELP: list[str] = [
     "Each round: solve a problem, then command your troops.",
     "",
@@ -246,14 +241,14 @@ def verdict_popup(verdict: Verdict, round_state: RoundState | None, me: str) -> 
     if mine is not None:
         best = f"best so far {mine.best.passed}/{mine.best.total}" if mine.best else ""
         lines.append(f"attempt {mine.submissions}   {best}".strip())
-    lines.append("everyone else now has a minute" if passed else "press [s] to edit and try again")
+    grace = f"everyone else now has {GRACE_SECONDS:.0f} seconds"
+    lines.append(grace if passed else "press [s] to edit and try again")
     return [*lines, "", "[any key] close   [v] show this again"]
 
 
 # Where on the map a territory is, said the way somebody looking at the board
-# would say it. A territory id is the only handle the protocol has, and it is
-# no help at all to a player who has never seen one: the report used to open
-# "territory 15:" and leave them to find it.
+# would say it. A territory id is the only handle the protocol has, and no help
+# at all to a player who has never seen one.
 COMPASS: tuple[tuple[str, str, str], ...] = (
     ("north-west", "north", "north-east"),
     ("west", "middle", "east"),
@@ -278,11 +273,9 @@ def whereabouts(world: terrain.WorldMap, territory_id: int) -> str:
 def _outcome(battle: BattleReport, me: str) -> str:
     """One line saying who ended up with the ground, and who lost it.
 
-    Taking ground and holding it are different results and used to read the
-    same, because the report could only name who owned the territory once the
-    dust settled. Naming the side that lost is the half a player feels: being
-    told "Mason holds it" when it was yours a moment ago is a fact about the
-    board, not about what happened to you.
+    Taking ground and holding it are different results. Naming the side that
+    lost is the half a player feels: "Mason holds it" is a fact about the
+    board, where "Mason took it from you" is one about their game.
     """
     if battle.winner is None:
         lost = "yours" if battle.defender == me else f"{battle.defender_name}'s"
@@ -350,9 +343,8 @@ def battles_popup(
 
     def place(territory_id: int) -> str:
         where = whereabouts(world, territory_id) if world is not None else f"territory {territory_id}"
-        # The id stays, in brackets. Nobody navigates by it, but it is what the
-        # logs and the server say, so dropping it entirely makes the two
-        # impossible to line up when something looks wrong.
+        # The id stays in brackets: nobody navigates by it, but it is what the
+        # logs and the server say.
         return f"{where}  ({territory_id})"
 
     def mine(battle: BattleReport) -> bool:
@@ -378,13 +370,10 @@ def battles_popup(
     return [*lines, "", "the board marks these until you next command", "[any key] back to the board"]
 
 
-# A reveal lands on top of whatever the player was doing - the phase ends on
-# the server's clock, not on theirs - so without a hold it is dismissed by the
-# key they were already pressing. A longer report earns proportionally longer,
-# up to a cap: a whole board's worth of fighting is a lot to take in.
-REVEAL_HOLD_SECONDS = 4.0
-REVEAL_HOLD_PER_BATTLE = 1.5
-REVEAL_HOLD_LIMIT = 20.0
+# A reveal lands on the server's clock, not the player's, so a key already on
+# its way down would close it before anybody had read a word. Long enough to
+# swallow that key and no longer; [v] brings it back.
+REVEAL_HOLD_SECONDS = 0.4
 
 # The winner's panel ends the game, so there is nothing to get back to.
 GAME_OVER_HOLD_SECONDS = 12.0
@@ -392,15 +381,21 @@ GAME_OVER_HOLD_SECONDS = 12.0
 
 def reveal_hold(battles: list[BattleReport], dropped: list[DroppedOrder] | None = None) -> float:
     """Seconds `battles_popup` should stay up before it can be dismissed."""
-    entries = len(battles) + len(dropped or [])
-    if not entries:
+    if not battles and not dropped:
         # Nothing to read, so nothing to protect from a stray keystroke.
         return 0.0
-    return min(REVEAL_HOLD_LIMIT, REVEAL_HOLD_SECONDS + REVEAL_HOLD_PER_BATTLE * entries)
+    return REVEAL_HOLD_SECONDS
 
 
-def hold_notice(seconds: float) -> str:
-    """Replaces a popup's dismiss hint for as long as the hint would be a lie."""
+# Below this the hold is over before a notice about it could be read, and the
+# panel would flash a countdown nobody had a chance to act on.
+HOLD_NOTICE_FLOOR = 1.0
+
+
+def hold_notice(seconds: float) -> str | None:
+    """Replaces a popup's dismiss hint while the hint would be a lie."""
+    if seconds < HOLD_NOTICE_FLOOR:
+        return None
     return f"[any key] in {math.ceil(seconds)}s"
 
 
@@ -411,9 +406,8 @@ def game_over_popup(name: str, winner: str | None) -> list[str]:
 
 
 # Wide enough for the longest name a player may take plus the marker on their
-# own row. Derived rather than written down: a column narrower than the limit
-# truncates a legal name, and the first thing it eats is the "(you)" that says
-# which row is yours.
+# own row. Derived, because a narrower column truncates a legal name and the
+# first thing it eats is the "(you)" saying which row is yours.
 YOU_MARKER = " (you)"
 NAME_COLUMN = MAX_NAME_LENGTH + len(YOU_MARKER)
 

@@ -22,10 +22,6 @@ from protocol.lobby import Lobby
 from protocol.rounds import BattleReport, DroppedOrder, Placement, RoundState, TerritoryUpdate, Verdict
 from protocol.terrain import World
 
-# --------------------------------------------------------------------------
-# Responses
-# --------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class Joined:
@@ -102,11 +98,6 @@ class Acknowledged:
 class Echoed:
     text: str
     kind: Literal["echoed"] = "echoed"
-
-
-# --------------------------------------------------------------------------
-# Requests
-# --------------------------------------------------------------------------
 
 
 def version_complaint(theirs: int, peer: str, ours: int = PROTOCOL_VERSION) -> str | None:
@@ -207,11 +198,6 @@ class Echo(Request[Echoed]):
     action: Literal["echo"] = "echo"
 
 
-# --------------------------------------------------------------------------
-# Events
-# --------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class LobbyChanged:
     """Somebody joined, left, or changed their mind about being ready.
@@ -280,10 +266,6 @@ class MovesResolved:
     dropped: list[DroppedOrder] = field(default_factory=list)
     kind: Literal["moves_resolved"] = "moves_resolved"
 
-
-# --------------------------------------------------------------------------
-# Unions
-# --------------------------------------------------------------------------
 
 # Annotated rather than `type` aliases: pydantic needs the discriminator to
 # switch on the tag instead of trying each member in turn, which is both faster

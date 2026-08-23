@@ -37,9 +37,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # How long a phase runs before the server moves everyone on regardless.
-SUBMIT_SECONDS = 60.0
-# Long enough to look at the board and decide where the round's troops go,
-# which is the only decision this phase asks for.
+SUBMIT_SECONDS = 120.0
+# Long enough to look at the board and decide where the round's troops go.
 COMMAND_SECONDS = 150.0
 
 # Once somebody solves the problem, how long everyone else gets to finish.

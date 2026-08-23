@@ -12,8 +12,6 @@ buttons only.
 
 from __future__ import annotations
 
-from PlaySound import beep
-from blessed import Terminal
 import argparse
 import asyncio
 import sys
@@ -27,6 +25,7 @@ import blessed
 from client.input import AppEvent, KeyPress, Received, Resized
 from client.palette import PANEL_BG, PANEL_FG, SELECTED_BG, SELECTED_FG, Color
 from client.render import CELL_WIDTH
+from PlaySound import beep
 from protocol.lobby import MAX_NAME_LENGTH, clean_name
 from protocol.terrain import Terrain
 
